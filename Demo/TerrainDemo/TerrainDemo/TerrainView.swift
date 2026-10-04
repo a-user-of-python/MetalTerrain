@@ -112,7 +112,7 @@ struct TerrainView: UIViewRepresentable {
         // Starts at a 3/4 aerial view.
         var yaw: Float = -0.6
         var pitch: Float = 0.62
-        var distance: Float = 340
+        var distance: Float = 550
         var target = SIMD3<Float>(0, 0, 0)
         // Walk mode: player position on the XZ plane. Y follows terrain.
         var playerPos = SIMD2<Float>(0, 0)
@@ -300,7 +300,7 @@ struct TerrainView: UIViewRepresentable {
                 // Walk mode: first-person. Joystick moves the player on XZ;
                 // Y follows the terrain height + eye height (player size).
                 let input = parent.moveInput
-                let speed: Float = 25  // world units/sec at full tilt
+                let speed: Float = 45  // world units/sec at full tilt
                 let dt = min(frameDt, 0.1)
                 let forward = SIMD2<Float>(sin(walkYaw), cos(walkYaw))
                 let right = SIMD2<Float>(forward.y, -forward.x)

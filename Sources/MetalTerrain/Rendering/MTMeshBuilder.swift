@@ -47,7 +47,7 @@ public enum MTMeshBuilder {
 
     /// Biome colors blend toward the neighboring biome within this normalized
     /// height distance of a biome border.
-    private static let biomeBlendRange: Float = 0.12
+    private static let biomeBlendRange: Float = 0.18
 
     /// Slopes steeper than this (1 - normal.y) use the biome's slopeColor.
     private static let cliffSlopeThreshold: Float = 0.55
