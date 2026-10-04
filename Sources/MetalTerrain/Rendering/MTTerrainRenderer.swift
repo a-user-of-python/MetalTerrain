@@ -243,7 +243,7 @@ public final class MTTerrainRenderer {
         cacheLock.unlock()
         for mesh in meshes {
             encoder.setVertexBuffer(mesh.vertexBuffer, offset: 0, index: 0)
-            encoder.drawIndexedPrimitives(.triangle,
+            encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: mesh.indexCount,
                                           indexType: .uint32,
                                           indexBuffer: mesh.indexBuffer,
@@ -260,7 +260,7 @@ public final class MTTerrainRenderer {
             else { continue }
             encoder.setVertexBuffer(sm.vertexBuffer, offset: 0, index: 0)
             encoder.setVertexBuffer(instanceBuffer, offset: 0, index: 2)
-            encoder.drawIndexedPrimitives(.triangle,
+            encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: sm.indexCount,
                                           indexType: .uint32,
                                           indexBuffer: sm.indexBuffer,
@@ -276,7 +276,7 @@ public final class MTTerrainRenderer {
             var alpha = waterAlpha
             encoder.setFragmentBytes(&alpha, length: MemoryLayout<Float>.stride, index: 2)
             encoder.setVertexBuffer(wvb, offset: 0, index: 0)
-            encoder.drawIndexedPrimitives(.triangle,
+            encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: waterIndexCount,
                                           indexType: .uint32,
                                           indexBuffer: wib,
@@ -358,11 +358,13 @@ public final class MTTerrainRenderer {
     // MARK: Pipelines
 
     private func defaultLibrary() -> MTLLibrary {
-        guard let lib = device.makeDefaultLibrary(bundle: .module) else {
+        // Newer SDKs: makeDefaultLibrary throws and returns non-optional.
+        do {
+            return try device.makeDefaultLibrary(bundle: .module)
+        } catch {
             preconditionFailure("MTTerrainRenderer: default Metal library not found in bundle (.module). " +
-                                "MTShaders.metal must be part of the MetalTerrain target.")
+                                "MTShaders.metal must be part of the MetalTerrain target: \(error)")
         }
-        return lib
     }
 
     private func buildPipelines() {
@@ -388,10 +390,14 @@ public final class MTTerrainRenderer {
             }
             d.vertexFunction = v
             d.fragmentFunction = f
-            d.colorAttachments[0].pixelFormat = .bgra8Unorm
+            // Newer SDKs: colorAttachments[0] is optional.
+            guard let color0 = d.colorAttachments[0] else {
+                preconditionFailure("MTTerrainRenderer: color attachment 0 missing")
+            }
+            color0.pixelFormat = .bgra8Unorm
             d.depthAttachmentPixelFormat = .depth32Float
             if blending {
-                let a = d.colorAttachments[0]
+                let a = color0
                 a.isBlendingEnabled = true
                 a.rgbBlendOperation = .add
                 a.alphaBlendOperation = .add
@@ -465,7 +471,9 @@ public final class MTTerrainRenderer {
         d.vertexFunctionDescriptor = vDesc
         d.fragmentFunctionDescriptor = fDesc
         d.inputPrimitiveTopology = .triangle
-        let color = d.colorAttachments[0]
+        guard let color = d.colorAttachments[0] else {
+            preconditionFailure("MTTerrainRenderer: Metal 4 color attachment 0 missing")
+        }
         color.pixelFormat = .bgra8Unorm
         if blending {
             color.blendingState = .enabled
