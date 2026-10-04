@@ -15,25 +15,9 @@ struct ContentView: View {
     @State private var cameraMode: CameraMode = .orbit
     @State private var playerHeight: Float = 2
     @State private var moveInput = SIMD2<Float>(0, 0)
-    @State private var sunAzimuth: Float = 45
-    @State private var sunElevation: Float = 50
-    // Throttled sun values actually sent to the renderer (slider drags
-    // update the UI instantly but only push to Metal at 15Hz).
-    @State private var sunAzimuthSent: Float = 45
-    @State private var sunElevationSent: Float = 50
-    @State private var sunThrottleWork: DispatchWorkItem?
-
-    /// Push slider values to the renderer at most 15x/sec.
-    private func throttledSunPush() {
-        sunThrottleWork?.cancel()
-        let work = DispatchWorkItem {
-            sunAzimuthSent = sunAzimuth
-            sunElevationSent = sunElevation
-        }
-        sunThrottleWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.066, execute: work)
-    }
     @State private var fps: Double = 0
+    // Renderer ref for direct sun updates (bypasses SwiftUI re-render).
+    @State private var terrainRenderer: MTTerrainRenderer?
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
 
@@ -55,12 +39,11 @@ struct ContentView: View {
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
                     moveInput: $moveInput,
-                    sunAzimuth: $sunAzimuthSent,
-                    sunElevation: $sunElevationSent
+                    sunAzimuth: .constant(45),
+                    sunElevation: .constant(50),
+                    onRendererReady: { terrainRenderer = $0 }
                 )
                 .ignoresSafeArea()
-                .onChange(of: sunAzimuth) { throttledSunPush() }
-                .onChange(of: sunElevation) { throttledSunPush() }
 
                 // Show/hide button (top-right, always reachable)
                 VStack {
@@ -131,8 +114,11 @@ struct ContentView: View {
             viewDistance: $viewDistance,
             cameraMode: $cameraMode,
             playerHeight: $playerHeight,
-            sunAzimuth: $sunAzimuth,
-            sunElevation: $sunElevation,
+            onSunChange: { az, el in
+                // Direct to renderer: no SwiftUI re-render, no frame dip.
+                terrainRenderer?.sunAzimuth = az
+                terrainRenderer?.sunElevation = el
+            },
             fps: fps,
             dragMode: $dragMode,
             onRegenerate: regenerate,

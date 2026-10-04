@@ -1,5 +1,35 @@
 import SwiftUI
 
+/// Sun angle sliders. Uses local @State and a direct callback to the renderer
+/// so dragging does NOT trigger a full ContentView re-render (which caused
+/// the 30fps dip). Only this tiny view re-renders on drag.
+struct SunControls: View {
+    @State private var azimuth: Float
+    @State private var elevation: Float
+    var onChange: (Float, Float) -> Void
+
+    init(azimuth: Float, elevation: Float, onChange: @escaping (Float, Float) -> Void) {
+        _azimuth = State(initialValue: azimuth)
+        _elevation = State(initialValue: elevation)
+        self.onChange = onChange
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Sun direction: \(Int(azimuth))°")
+                .font(.headline)
+            Slider(value: $azimuth, in: 0...360, step: 1)
+                .tint(.orange)
+                .onChange(of: azimuth) { onChange(azimuth, elevation) }
+            Text("Sun height: \(Int(elevation))°")
+                .font(.headline)
+            Slider(value: $elevation, in: 5...90, step: 1)
+                .tint(.orange)
+                .onChange(of: elevation) { onChange(azimuth, elevation) }
+        }
+    }
+}
+
 /// Bottom/side control panel for the terrain demo.
 /// Organized into collapsible sections. Large type, high contrast.
 struct ControlPanel: View {
@@ -12,8 +42,7 @@ struct ControlPanel: View {
     @Binding var viewDistance: Int
     @Binding var cameraMode: CameraMode
     @Binding var playerHeight: Float
-    @Binding var sunAzimuth: Float
-    @Binding var sunElevation: Float
+    var onSunChange: (Float, Float) -> Void
     var fps: Double
     @Binding var dragMode: DragMode
     var onRegenerate: () -> Void
@@ -82,16 +111,7 @@ struct ControlPanel: View {
                     Toggle("Fog", isOn: $fogEnabled)
                     Toggle("Structures", isOn: $structuresEnabled)
                     Toggle("Wireframe", isOn: $wireframe)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Sun direction: \(Int(sunAzimuth))°")
-                            .font(.headline)
-                        Slider(value: $sunAzimuth, in: 0...360, step: 1)
-                            .tint(.orange)
-                        Text("Sun height: \(Int(sunElevation))°")
-                            .font(.headline)
-                        Slider(value: $sunElevation, in: 5...90, step: 1)
-                            .tint(.orange)
-                    }
+                    SunControls(azimuth: 45, elevation: 50, onChange: onSunChange)
                 }
                 .font(.headline)
                 .padding(.top, 4)
