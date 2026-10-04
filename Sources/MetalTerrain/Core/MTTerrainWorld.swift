@@ -60,6 +60,8 @@ public final class MTTerrainWorld {
     private var cachedNoiseSeed: UInt64?
     private var cachedNoise: MTPerlinNoise?
     private var cachedWarpNoise: MTPerlinNoise?
+    private var cachedStructureDensityNoise: MTPerlinNoise?
+    private var cachedStructureKindNoise: MTPerlinNoise?
 
     /// Returns the (base, warp) noise tables for the current seed,
     /// building them once and reusing them until the seed changes.
@@ -71,9 +73,21 @@ public final class MTTerrainWorld {
         if cachedNoiseSeed != currentSeed || cachedNoise == nil {
             cachedNoise = MTPerlinNoise(seed: currentSeed)
             cachedWarpNoise = MTPerlinNoise(seed: currentSeed ^ Self.warpSeedXor)
+            cachedStructureDensityNoise = MTPerlinNoise(seed: currentSeed ^ Self.structureSeedXor)
+            cachedStructureKindNoise = MTPerlinNoise(
+                seed: (currentSeed ^ Self.structureSeedXor) ^ Self.kindSeedXor)
             cachedNoiseSeed = currentSeed
         }
         let pair = (cachedNoise!, cachedWarpNoise!)
+        noiseLock.unlock()
+        return pair
+    }
+
+    /// Returns the cached (density, kind) structure noise tables.
+    private func structureNoisePair() -> (MTPerlinNoise, MTPerlinNoise) {
+        _ = noisePair()  // ensure tables are built
+        noiseLock.lock()
+        let pair = (cachedStructureDensityNoise!, cachedStructureKindNoise!)
         noiseLock.unlock()
         return pair
     }
@@ -205,9 +219,7 @@ public final class MTTerrainWorld {
         let z0 = Double(coord.z) * size
 
         var rng = MTSeededRandom(seed: chunkSeed(for: coord))
-        let densityNoise = MTPerlinNoise(seed: seed ^ Self.structureSeedXor)
-        let kindNoise = MTPerlinNoise(
-            seed: (seed ^ Self.structureSeedXor) ^ Self.kindSeedXor)
+        let (densityNoise, kindNoise) = structureNoisePair()
 
         // Higher density -> lower keep threshold -> more structures.
         let threshold = 1.0 - Double(config.structureDensity)

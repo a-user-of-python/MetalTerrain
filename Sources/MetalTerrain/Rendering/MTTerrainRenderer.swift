@@ -178,8 +178,9 @@ public final class MTTerrainRenderer {
         for coord in chunkCache.keys where Self.chebyshev(coord, center) > radius {
             chunkCache.removeValue(forKey: coord)
         }
-        // LRU cap: never hold more than the full visible square.
-        let cap = (2 * radius + 1) * (2 * radius + 1)
+        // LRU cap: never hold more than the full visible square, with an
+        // absolute ceiling so a large viewDistance can't exhaust iPad memory.
+        let cap = min((2 * radius + 1) * (2 * radius + 1), Self.maxChunkCacheSize)
         if chunkCache.count > cap {
             let oldest = chunkCache
                 .sorted { $0.value.lastUsed < $1.value.lastUsed }
@@ -237,23 +238,24 @@ public final class MTTerrainRenderer {
         frameIndex = (frameIndex + 1) % maxFramesInFlight
         let terrainSlot = frameIndex * slotsPerFrame
         let waterSlot = terrainSlot + 1
-        writeUniforms(slot: terrainSlot, model: matrix_identity_float4x4)
+        let time = Float(Date().timeIntervalSince(startTime))
+        writeUniforms(slot: terrainSlot, model: matrix_identity_float4x4, time: time)
         // Water plane is built around the XZ origin; recenter it under the camera.
         writeUniforms(slot: waterSlot,
                       model: mtTranslation(SIMD3<Float>(lastCameraTarget.x, 0,
-                                                        lastCameraTarget.y)))
+                                                        lastCameraTarget.y)),
+                      time: time)
 
         encoder.setDepthStencilState(depthState)
         encoder.setTriangleFillMode(wireframe ? .lines : .fill)
         encoder.setCullMode(.back)
 
-        // 1 draw call per chunk.
+        // 1 draw call per chunk. Iterate under the lock instead of
+        // copying to an Array every frame (was a 60fps allocation).
         encoder.setRenderPipelineState(terrainPipeline)
         bindUniforms(encoder, slot: terrainSlot)
         cacheLock.lock()
-        let meshes = Array(chunkCache.values)
-        cacheLock.unlock()
-        for mesh in meshes {
+        for mesh in chunkCache.values {
             encoder.setVertexBuffer(mesh.vertexBuffer, offset: 0, index: 0)
             encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: mesh.indexCount,
@@ -261,6 +263,7 @@ public final class MTTerrainRenderer {
                                           indexBuffer: mesh.indexBuffer,
                                           indexBufferOffset: 0)
         }
+        cacheLock.unlock()
 
         // 1 instanced draw per structure kind.
         encoder.setRenderPipelineState(structurePipeline)
@@ -332,6 +335,9 @@ public final class MTTerrainRenderer {
     private let maxFramesInFlight = 3
     private let frameSemaphore = DispatchSemaphore(value: 3)
     private let slotsPerFrame = 2
+    /// Absolute ceiling on cached chunk meshes: ~300 chunks x ~290KB.
+    /// Prevents memory exhaustion if viewDistance is raised.
+    private static let maxChunkCacheSize = 300
     private let uniformStride: Int
     /// 256-byte aligned stride for buffer offsets (Metal requirement).
     private let uniformStrideAligned: Int
@@ -540,7 +546,7 @@ public final class MTTerrainRenderer {
         uniformBuffer = buf
     }
 
-    private func writeUniforms(slot: Int, model: simd_float4x4) {
+    private func writeUniforms(slot: Int, model: simd_float4x4, time: Float) {
         let cfg = world.config
         let u = MTUniforms(
             viewProj: viewProj,
@@ -548,7 +554,7 @@ public final class MTTerrainRenderer {
             cameraPos: SIMD4<Float>(cameraPos, 1),
             fogColor: SIMD4<Float>(cfg.fogColor, cfg.fogDensity),
             lightDir: SIMD4<Float>(normalize(SIMD3<Float>(0.45, 0.75, 0.35)), 0.38),
-            misc: SIMD4<Float>(Float(Date().timeIntervalSince(startTime)), 0, 0, 0)
+            misc: SIMD4<Float>(time, 0, 0, 0)
         )
         var copy = u
         let dst = uniformBuffer.contents().advanced(by: slot * uniformStrideAligned)

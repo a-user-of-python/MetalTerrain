@@ -47,7 +47,7 @@ public enum MTMeshBuilder {
 
     /// Biome colors blend toward the neighboring biome within this normalized
     /// height distance of a biome border.
-    private static let biomeBlendRange: Float = 0.02
+    private static let biomeBlendRange: Float = 0.01
 
     /// Slopes steeper than this (1 - normal.y) use the biome's slopeColor.
     private static let cliffSlopeThreshold: Float = 0.55
@@ -71,13 +71,15 @@ public enum MTMeshBuilder {
 
     /// Builds a mesh for a chunk at a level of detail chosen by
     /// `distanceFactor` (0 = at the camera, 1 = edge of view distance).
-    /// Beyond 0.5 the grid is built at half resolution (every 2nd vertex).
+    /// LOD is currently disabled (always full resolution): the half-res
+    /// path created T-junction cracks between neighboring chunks of
+    /// different resolutions. Re-enable only with proper skirt/stitching.
     public static func buildLOD(
         for chunk: MTChunk,
         world: MTTerrainWorld,
         distanceFactor: Float
     ) -> (vertices: [MTVertex], indices: [UInt32]) {
-        buildGrid(chunk: chunk, world: world, stride: distanceFactor > 0.5 ? 2 : 1)
+        buildGrid(chunk: chunk, world: world, stride: 1)
     }
 
     // MARK: Water

@@ -37,19 +37,21 @@ public struct MTTerrainConfig {
         fogColor: SIMD3<Float> = SIMD3<Float>(0.62, 0.74, 0.86),
         fogDensity: Float = 0.0028
     ) {
-        self.chunkResolution = chunkResolution
-        self.chunkWorldSize = chunkWorldSize
-        self.viewDistance = viewDistance
-        self.seaLevel = seaLevel
-        self.heightScale = heightScale
+        self.chunkResolution = max(2, chunkResolution)
+        // Clamp to safe ranges: negative/huge viewDistance crashes or
+        // exhausts memory; zero chunkWorldSize divides by zero.
+        self.chunkWorldSize = max(1, chunkWorldSize)
+        self.viewDistance = min(max(1, viewDistance), 20)
+        self.seaLevel = min(max(0, seaLevel), 1)
+        self.heightScale = max(1, heightScale)
         self.biomes = biomes
         self.noise = noise
         self.structureNoise = structureNoise
         self.structuresEnabled = structuresEnabled
-        self.structureDensity = structureDensity
+        self.structureDensity = min(max(0, structureDensity), 1)
         self.waterColor = waterColor
         self.fogColor = fogColor
-        self.fogDensity = fogDensity
+        self.fogDensity = max(0, fogDensity)
     }
 
     /// Sensible defaults for every field.
