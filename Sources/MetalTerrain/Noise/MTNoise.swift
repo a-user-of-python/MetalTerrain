@@ -24,7 +24,7 @@ public struct MTNoiseConfig {
 
     public init(seed: UInt64 = 1337, octaves: Int = 5,
                 baseFrequency: Double = 0.004, amplitude: Double = 1.0,
-                lacunarity: Double = 2.03, gain: Double = 0.5,
+                lacunarity: Double = 2.03, gain: Double = 0.42,
                 warpStrength: Double = 0.25, warpFrequency: Double = 0.015,
                 ridged: Bool = false) {
         self.seed = seed
