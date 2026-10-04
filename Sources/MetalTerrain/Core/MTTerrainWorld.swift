@@ -170,8 +170,10 @@ public final class MTTerrainWorld {
 
     /// Generate a chunk's heightmap. Deterministic: the same seed,
     /// config, and coord always yield the same grid.
-    public func generateChunk(at coord: MTChunkCoord) -> MTChunk {
-        let res = max(2, config.chunkResolution)
+    public func generateChunk(at coord: MTChunkCoord, resolutionScale: Float = 1) -> MTChunk {
+        // LOD: distant chunks generate at reduced resolution (fewer noise evals).
+        // resolutionScale=0.5 -> half the vertices per side -> 4x fewer evals.
+        let res = max(2, Int(Float(max(2, config.chunkResolution)) * resolutionScale))
         let size = config.chunkWorldSize
         // Compute the chunk origin in Double: Float's 24-bit mantissa loses
         // integer precision past ~16M, which would misalign distant chunks.

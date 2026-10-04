@@ -21,10 +21,10 @@ public struct MTTerrainConfig {
 
     public init(
         chunkResolution: Int = 96,
-        chunkWorldSize: Float = 128,
+        chunkWorldSize: Float = 192,
         viewDistance: Int = 6,
         seaLevel: Float = 0.45,
-        heightScale: Float = 60,
+        heightScale: Float = 90,
         biomes: [MTBiome] = MTBiome.default,
         noise: MTNoiseConfig = MTNoiseConfig(),
         structureNoise: MTNoiseConfig = MTNoiseConfig(

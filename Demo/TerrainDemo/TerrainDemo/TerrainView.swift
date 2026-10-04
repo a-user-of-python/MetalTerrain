@@ -299,11 +299,28 @@ struct TerrainView: UIViewRepresentable {
                 // Walk mode: first-person. Joystick moves the player on XZ;
                 // Y follows the terrain height + eye height (player size).
                 let input = parent.moveInput
-                let speed: Float = 60  // world units/sec at full tilt
+                let speed: Float = 25  // world units/sec at full tilt
                 let dt = min(frameDt, 0.1)
                 let forward = SIMD2<Float>(sin(walkYaw), cos(walkYaw))
                 let right = SIMD2<Float>(forward.y, -forward.x)
-                playerPos += (forward * -input.y + right * input.x) * speed * dt
+                let delta = (forward * -input.y + right * input.x) * speed * dt
+                // Water blocking: don't walk into the ocean.
+                let tryPos = playerPos + delta
+                let tryHeight = world.heightAt(x: Double(tryPos.x), z: Double(tryPos.y))
+                if tryHeight >= world.config.seaLevel {
+                    playerPos = tryPos
+                }
+                // If blocked, try sliding along each axis separately.
+                else {
+                    let tryX = SIMD2<Float>(playerPos.x + delta.x, playerPos.y)
+                    let hx = world.heightAt(x: Double(tryX.x), z: Double(tryX.y))
+                    if hx >= world.config.seaLevel { playerPos = tryX }
+                    else {
+                        let tryZ = SIMD2<Float>(playerPos.x, playerPos.y + delta.y)
+                        let hz = world.heightAt(x: Double(tryZ.x), z: Double(tryZ.y))
+                        if hz >= world.config.seaLevel { playerPos = tryZ }
+                    }
+                }
                 let groundY = world.worldY(forHeight: world.heightAt(x: Double(playerPos.x), z: Double(playerPos.y)))
                 let eyeY = groundY + max(2, parent.playerHeight)
                 camPosition = SIMD3<Float>(playerPos.x, eyeY, playerPos.y)

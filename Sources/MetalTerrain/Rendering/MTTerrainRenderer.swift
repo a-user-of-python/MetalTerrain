@@ -638,12 +638,14 @@ public final class MTTerrainRenderer {
         cacheLock.unlock()
         buildQueue.async { [weak self] in
             guard let self = self else { return }
-            let chunk = self.world.generateChunk(at: coord)
             let size = self.world.config.chunkWorldSize
             let cx = (Float(coord.x) + 0.5) * size
             let cz = (Float(coord.z) + 0.5) * size
             let dist = hypot(cx - cameraTarget.x, cz - cameraTarget.y)
             let distanceFactor = dist / (Float(self.world.config.viewDistance) * size)
+            // LOD: far chunks generate at half resolution (4x fewer noise evals).
+            let resScale: Float = distanceFactor > 0.4 ? 0.5 : 1.0
+            let chunk = self.world.generateChunk(at: coord, resolutionScale: resScale)
             let mesh = MTMeshBuilder.buildLOD(for: chunk, world: self.world,
                                               distanceFactor: distanceFactor)
             guard let vb = self.sharedBuffer(from: mesh.vertices),
