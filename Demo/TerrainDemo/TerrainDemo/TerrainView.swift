@@ -109,6 +109,7 @@ struct TerrainView: UIViewRepresentable {
         private var lastSeed: UInt64?
         private var lastToken: Int?
         private var lastPreset: BiomePreset?
+        private var lastStructuresEnabled: Bool?
 
         private var fpsEMA: Double = 60
         private var lastFrameTime: CFTimeInterval = 0
@@ -175,7 +176,14 @@ struct TerrainView: UIViewRepresentable {
             }
             renderer?.wireframe = parent.wireframe
             renderer?.showsWater = parent.showsWater
-            world?.structuresEnabled = parent.structuresEnabled
+            // Only write when changed: the setter bumps configVersion, which
+            // makes the renderer invalidate all chunk caches. Writing the same
+            // value every sync() (2x/sec via the FPS label) caused a perpetual
+            // rebuild storm — the terrain never stabilized.
+            if lastStructuresEnabled != parent.structuresEnabled {
+                lastStructuresEnabled = parent.structuresEnabled
+                world?.structuresEnabled = parent.structuresEnabled
+            }
         }
 
         // MARK: World construction

@@ -151,6 +151,15 @@ public final class MTTerrainRenderer {
         let center = MTChunkCoord(x: Int(floor(cameraTarget.x / size)),
                                   z: Int(floor(cameraTarget.y / size)))
 
+        // Fast path: if the camera hasn't crossed a chunk boundary, the needed
+        // set is identical — skip the Set rebuild, eviction scan, and dispatch
+        // loop entirely. (update() runs 60x/sec; this work is only needed
+        // on movement.)
+        if center == lastCenter {
+            return
+        }
+        lastCenter = center
+
         var needed = Set<MTChunkCoord>()
         needed.reserveCapacity((2 * radius + 1) * (2 * radius + 1))
         for dz in -radius...radius {
@@ -308,6 +317,7 @@ public final class MTTerrainRenderer {
     private var viewProj = matrix_identity_float4x4
     private var cameraPos = SIMD3<Float>(0, 0, 0)
     private var lastCameraTarget = SIMD2<Float>(0, 0)
+    private var lastCenter: MTChunkCoord?
     private var lastConfigVersion: UInt64 = 0
     private let waterAlpha: Float = 0.82
     private let startTime = Date()
@@ -333,7 +343,12 @@ public final class MTTerrainRenderer {
     private var pendingBuilds = Set<MTChunkCoord>()
     private let cacheLock = NSLock()
     private let buildQueue = DispatchQueue(label: "com.MetalTerrain.meshBuild",
-                                           qos: .userInitiated)
+                                           qos: .userInitiated,
+                                           attributes: .concurrent)
+    // Generation counter: bumped by invalidateCaches(). Background builds
+    // capture the generation at dispatch; if it changed by completion,
+    // the mesh is stale (built from an old config) and must be dropped.
+    private var buildGeneration: UInt64 = 0
 
     private var waterVertexBuffer: MTLBuffer?
     private var waterIndexBuffer: MTLBuffer?
@@ -543,6 +558,11 @@ public final class MTTerrainRenderer {
     // MARK: Chunk streaming
 
     private func buildChunkAsync(_ coord: MTChunkCoord, cameraTarget: SIMD2<Float>) {
+        // Capture the generation: if caches were invalidated while this
+        // build was in flight, the mesh is stale — drop it.
+        cacheLock.lock()
+        let generation = buildGeneration
+        cacheLock.unlock()
         buildQueue.async { [weak self] in
             guard let self = self else { return }
             let chunk = self.world.generateChunk(at: coord)
@@ -561,10 +581,13 @@ public final class MTTerrainRenderer {
                 return
             }
             self.cacheLock.lock()
-            self.chunkCache[coord] = ChunkMesh(vertexBuffer: vb,
-                                               indexBuffer: ib,
-                                               indexCount: mesh.indices.count,
-                                               lastUsed: Date().timeIntervalSince1970)
+            // Drop stale builds: config changed while we were generating.
+            if generation == self.buildGeneration {
+                self.chunkCache[coord] = ChunkMesh(vertexBuffer: vb,
+                                                   indexBuffer: ib,
+                                                   indexCount: mesh.indices.count,
+                                                   lastUsed: Date().timeIntervalSince1970)
+            }
             self.pendingBuilds.remove(coord)
             self.cacheLock.unlock()
         }
@@ -583,6 +606,7 @@ public final class MTTerrainRenderer {
         cacheLock.lock()
         chunkCache.removeAll()
         pendingBuilds.removeAll()
+        buildGeneration &+= 1
         cacheLock.unlock()
         structureChunkSet = []
         clearStructureInstances()
@@ -618,29 +642,45 @@ public final class MTTerrainRenderer {
     }
 
     /// Rebuilds per-kind instance buffers (model matrix + tint) for the
-    /// currently visible chunks. Called only when the visible chunk set
-    /// changes, not every frame.
+    /// currently visible chunks. The expensive placement queries run on the
+    /// background build queue; only the buffer swap happens on main.
+    /// Called only when the visible chunk set changes, not every frame.
     private func rebuildStructureInstances(visible: Set<MTChunkCoord>) {
-        var perKind: [MTStructureKind: [MTInstanceData]] = [:]
-        // Sort for deterministic instance-buffer order: Swift Set iteration
-        // is randomized per run, which would make "same seed = same bytes"
-        // false at the buffer level.
-        for coord in visible.sorted() {
-            for placement in world.structures(in: coord) {
-                let model = mtTranslation(placement.position)
-                    * mtRotationY(placement.rotationY)
-                    * mtUniformScale(placement.scale)
-                perKind[placement.kind, default: []].append(
-                    MTInstanceData(model: model,
-                                   tint: SIMD4<Float>(1, 1, 1, 1)))
+        let world = self.world
+        // Capture the generation: drop results if config changed mid-build.
+        cacheLock.lock()
+        let generation = buildGeneration
+        cacheLock.unlock()
+        buildQueue.async { [weak self] in
+            guard let self = self else { return }
+            var perKind: [MTStructureKind: [MTInstanceData]] = [:]
+            // Sort for deterministic instance-buffer order: Swift Set
+            // iteration is randomized per run, which would make
+            // "same seed = same bytes" false at the buffer level.
+            for coord in visible.sorted() {
+                for placement in world.structures(in: coord) {
+                    let model = mtTranslation(placement.position)
+                        * mtRotationY(placement.rotationY)
+                        * mtUniformScale(placement.scale)
+                    perKind[placement.kind, default: []].append(
+                        MTInstanceData(model: model,
+                                       tint: SIMD4<Float>(1, 1, 1, 1)))
+                }
             }
-        }
-        for kind in MTStructureKind.allCases {
-            guard var sm = structureMeshes[kind] else { continue }
-            let list = perKind[kind] ?? []
-            sm.instanceCount = list.count
-            sm.instanceBuffer = list.isEmpty ? nil : sharedBuffer(from: list)
-            structureMeshes[kind] = sm
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.cacheLock.lock()
+                let fresh = (generation == self.buildGeneration)
+                self.cacheLock.unlock()
+                guard fresh else { return }
+                for kind in MTStructureKind.allCases {
+                    guard var sm = self.structureMeshes[kind] else { continue }
+                    let list = perKind[kind] ?? []
+                    sm.instanceCount = list.count
+                    sm.instanceBuffer = list.isEmpty ? nil : self.sharedBuffer(from: list)
+                    self.structureMeshes[kind] = sm
+                }
+            }
         }
     }
 

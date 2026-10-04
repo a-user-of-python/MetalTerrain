@@ -44,7 +44,13 @@ public final class MTTerrainWorld {
 
     /// Custom biomes added via `setBiome`, in insertion order.
     /// These take precedence over `config.biomes` in `biomeAt`.
-    private var customBiomes: [MTBiome] = []
+    /// Guarded by `stateLock`: mutated on the main thread (demo UI),
+    /// read on the background chunk-build queue.
+    private var _customBiomes: [MTBiome] = []
+    private var customBiomes: [MTBiome] {
+        get { stateLock.withLock { _customBiomes } }
+        set { stateLock.withLock { _customBiomes = newValue } }
+    }
 
     // Cached noise tables, keyed by seed. Building the 256-entry
     // permutation tables is the most expensive part of a height query;
