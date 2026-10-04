@@ -1,4 +1,5 @@
 import SwiftUI
+import MetalTerrain
 
 /// Root view: full-screen terrain with an overlay control panel.
 /// Portrait -> panel docks at the bottom. Landscape -> panel docks on the right.
