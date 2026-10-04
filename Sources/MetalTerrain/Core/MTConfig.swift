@@ -41,7 +41,7 @@ public struct MTTerrainConfig {
         // Clamp to safe ranges: negative/huge viewDistance crashes or
         // exhausts memory; zero chunkWorldSize divides by zero.
         self.chunkWorldSize = max(1, chunkWorldSize)
-        self.viewDistance = min(max(1, viewDistance), 20)
+        self.viewDistance = min(max(1, viewDistance), 10)
         self.seaLevel = min(max(0, seaLevel), 1)
         self.heightScale = max(1, heightScale)
         self.biomes = biomes

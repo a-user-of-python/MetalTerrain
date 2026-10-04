@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Bottom/side control panel for the terrain demo.
-/// Large type, high contrast — designed for low vision.
+/// Organized into collapsible sections. Large type, high contrast.
 struct ControlPanel: View {
     @Binding var seedText: String
     @Binding var preset: BiomePreset
@@ -18,132 +18,126 @@ struct ControlPanel: View {
     var onCloneWorld: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("TERRAIN CONTROLS")
                 .font(.title2)
                 .bold()
 
-            // Seed + regenerate
-            HStack(spacing: 12) {
-                Text("Seed")
-                    .font(.title3)
-                TextField("1337", text: $seedText)
-                    .font(.title2)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 150)
-                    .foregroundColor(.black)
-                Spacer()
-                Button(action: onRegenerate) {
-                    Text("Regenerate")
-                        .font(.title2)
-                        .bold()
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 14)
-                }
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(14)
-            }
-
-            // Clone world: duplicate the current seed into the seed field
-            Button(action: onCloneWorld) {
-                Text("Clone World")
-                    .font(.title3)
-                    .bold()
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-            }
-            .background(Color.green)
-            .foregroundColor(.white)
-            .cornerRadius(14)
-
-            // Biome preset picker
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Biome")
-                    .font(.title3)
-                Picker("Biome", selection: $preset) {
-                    ForEach(BiomePreset.allCases) { p in
-                        Text(p.rawValue).tag(p)
+            // World: seed + regenerate + clone (always visible)
+            DisclosureGroup("World") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Text("Seed")
+                            .font(.headline)
+                        TextField("1337", text: $seedText)
+                            .font(.body)
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 110)
+                            .foregroundColor(.black)
+                    }
+                    HStack(spacing: 10) {
+                        Button(action: onRegenerate) {
+                            Text("Regenerate")
+                                .font(.headline)
+                                .bold()
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                        }
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                        Button(action: onCloneWorld) {
+                            Text("Clone")
+                                .font(.headline)
+                                .bold()
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                        }
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Biome")
+                            .font(.headline)
+                        Picker("Biome", selection: $preset) {
+                            ForEach(BiomePreset.allCases) { p in
+                                Text(p.rawValue).tag(p)
+                            }
+                        }
+                        .pickerStyle(.segmented)
                     }
                 }
-                .pickerStyle(.segmented)
+                .padding(.top, 4)
             }
+            .font(.headline)
 
-            // Toggles
-            Toggle("Structures", isOn: $structuresEnabled)
-                .font(.title2)
-                .bold()
-            Toggle("Wireframe", isOn: $wireframe)
-                .font(.title2)
-                .bold()
-            Toggle("Water", isOn: $showsWater)
-                .font(.title2)
-                .bold()
-            Toggle("Fog", isOn: $fogEnabled)
-                .font(.title2)
-                .bold()
-
-            // Camera mode
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Camera")
-                    .font(.title2)
-                    .bold()
-                Picker("Camera", selection: $cameraMode) {
-                    ForEach(CameraMode.allCases) { m in
-                        Text(m.rawValue).tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            // Player size (walk mode eye height)
-            if cameraMode == .walk {
+            // Environment: water, fog, structures, wireframe
+            DisclosureGroup("Environment") {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Player height: \(Int(playerHeight))")
-                        .font(.title3)
-                    Slider(value: $playerHeight, in: 2...60, step: 1)
-                        .tint(.blue)
+                    Toggle("Water", isOn: $showsWater)
+                    Toggle("Fog", isOn: $fogEnabled)
+                    Toggle("Structures", isOn: $structuresEnabled)
+                    Toggle("Wireframe", isOn: $wireframe)
                 }
+                .font(.headline)
+                .padding(.top, 4)
             }
+            .font(.headline)
 
-            // Render distance (chunks radius)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Render distance: \(viewDistance)")
-                    .font(.title3)
-                Slider(value: Binding(
-                    get: { Double(viewDistance) },
-                    set: { viewDistance = Int($0) }
-                ), in: 2...16, step: 1)
-                .tint(.blue)
-            }
-
-            // Mac: pick what mouse-drag does (no two-finger touch on desktop).
-            #if targetEnvironment(macCatalyst)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Mouse drag")
-                    .font(.title3)
-                Picker("Mouse drag", selection: $dragMode) {
-                    ForEach(DragMode.allCases) { m in
-                        Text(m.rawValue).tag(m)
+            // View: camera mode, render distance, player height
+            DisclosureGroup("View") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Camera", selection: $cameraMode) {
+                        ForEach(CameraMode.allCases) { m in
+                            Text(m.rawValue).tag(m)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    if cameraMode == .walk {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Player height: \(Int(playerHeight))")
+                                .font(.headline)
+                            Slider(value: $playerHeight, in: 2...60, step: 1)
+                                .tint(.blue)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Render distance: \(viewDistance)")
+                            .font(.headline)
+                        Slider(value: Binding(
+                            get: { Double(viewDistance) },
+                            set: { viewDistance = Int($0) }
+                        ), in: 2...10, step: 1)
+                        .tint(.blue)
+                    }
+                    #if targetEnvironment(macCatalyst)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Mouse drag")
+                            .font(.headline)
+                        Picker("Mouse drag", selection: $dragMode) {
+                            ForEach(DragMode.allCases) { m in
+                                Text(m.rawValue).tag(m)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    #endif
                 }
-                .pickerStyle(.segmented)
-                Text("Arrows pan · +/− zoom · 0 resets · trackpad pinch zooms")
-                    .font(.callout)
-                    .opacity(0.75)
+                .padding(.top, 4)
             }
-            #endif
+            .font(.headline)
 
             // FPS readout
             Text("\(Int(fps)) FPS")
-                .font(.title2)
+                .font(.headline)
                 .bold()
                 .monospacedDigit()
         }
-        .padding(20)
+        .padding(14)
         .background(Color.black.opacity(0.78))
         .foregroundColor(.white)
-        .cornerRadius(18)
+        .cornerRadius(16)
     }
 }

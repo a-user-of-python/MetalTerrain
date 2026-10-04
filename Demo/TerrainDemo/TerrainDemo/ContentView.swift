@@ -66,17 +66,18 @@ struct ContentView: View {
                             Spacer()
                             ScrollView {
                                 panel
-                                    .frame(width: 340)
+                                    .frame(width: 280)
                             }
-                            .padding(.vertical)
+                            .frame(maxHeight: geo.size.height * 0.85)
+                            .padding(.vertical, 8)
                         }
-                        .padding(.trailing)
+                        .padding(.trailing, 8)
                     } else {
                         VStack {
                             Spacer()
                             panel
                         }
-                        .padding()
+                        .padding(8)
                     }
                 }
 

@@ -71,15 +71,15 @@ public enum MTMeshBuilder {
 
     /// Builds a mesh for a chunk at a level of detail chosen by
     /// `distanceFactor` (0 = at the camera, 1 = edge of view distance).
-    /// LOD is currently disabled (always full resolution): the half-res
-    /// path created T-junction cracks between neighboring chunks of
-    /// different resolutions. Re-enable only with proper skirt/stitching.
+    /// Chunks near the player use full resolution; distant chunks use half
+    /// resolution. The skirts hide T-junction cracks between LOD levels.
     public static func buildLOD(
         for chunk: MTChunk,
         world: MTTerrainWorld,
         distanceFactor: Float
     ) -> (vertices: [MTVertex], indices: [UInt32]) {
-        buildGrid(chunk: chunk, world: world, stride: 1)
+        // Full res within 40% of view distance, half res beyond.
+        buildGrid(chunk: chunk, world: world, stride: distanceFactor > 0.4 ? 2 : 1)
     }
 
     // MARK: Water

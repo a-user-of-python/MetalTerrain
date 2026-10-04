@@ -274,6 +274,8 @@ struct TerrainView: UIViewRepresentable {
 
             // Frame-time EMA -> FPS label (pushed to SwiftUI at most 2x/sec).
             let now = CACurrentMediaTime()
+            // Capture dt BEFORE lastFrameTime is updated below (walk mode needs it).
+            let frameDt = lastFrameTime > 0 ? Float(now - lastFrameTime) : 0
             if lastFrameTime > 0 {
                 let dt = now - lastFrameTime
                 if dt > 0 {
@@ -298,10 +300,10 @@ struct TerrainView: UIViewRepresentable {
                 // Y follows the terrain height + eye height (player size).
                 let input = parent.moveInput
                 let speed: Float = 60  // world units/sec at full tilt
-                let dt = lastFrameTime > 0 ? Float(now - lastFrameTime) : 0
+                let dt = min(frameDt, 0.1)
                 let forward = SIMD2<Float>(sin(walkYaw), cos(walkYaw))
                 let right = SIMD2<Float>(forward.y, -forward.x)
-                playerPos += (forward * -input.y + right * input.x) * speed * min(dt, 0.1)
+                playerPos += (forward * -input.y + right * input.x) * speed * dt
                 let groundY = world.worldY(forHeight: world.heightAt(x: Double(playerPos.x), z: Double(playerPos.y)))
                 let eyeY = groundY + max(2, parent.playerHeight)
                 camPosition = SIMD3<Float>(playerPos.x, eyeY, playerPos.y)
