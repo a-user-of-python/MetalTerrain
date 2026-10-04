@@ -10,9 +10,9 @@ using namespace metal;
 
 // Must match MTVertex in MTMeshBuilder.swift (36 bytes).
 struct MTVertexIn {
-    float3 position;
-    float3 normal;
-    float3 color;
+    float4 position;  // xyz
+    float4 normal;    // xyz
+    float4 color;     // rgb
 };
 
 // Must match MTUniforms in MTTerrainRenderer.swift (192 bytes).
@@ -46,12 +46,12 @@ vertex MTVaryings terrain_vertex(const device MTVertexIn *vertices [[buffer(0)]]
                                  constant MTUniforms &uniforms [[buffer(1)]],
                                  uint vid [[vertex_id]]) {
     MTVertexIn v = vertices[vid];
-    float4 world = uniforms.model * float4(v.position, 1.0);
+    float4 world = uniforms.model * float4(v.position.xyz, 1.0);
     MTVaryings out;
     out.clipPos = uniforms.viewProj * world;
     out.worldPos = world.xyz;
-    out.normal = (uniforms.model * float4(v.normal, 0.0)).xyz;
-    out.color = v.color;
+    out.normal = (uniforms.model * float4(v.normal.xyz, 0.0)).xyz;
+    out.color = v.color.rgb;
     return out;
 }
 
@@ -97,12 +97,12 @@ vertex MTVaryings structure_vertex(const device MTVertexIn *vertices [[buffer(0)
                                    uint iid [[instance_id]]) {
     MTVertexIn v = vertices[vid];
     MTInstanceData inst = instances[iid];
-    float4 world = inst.model * float4(v.position, 1.0);
+    float4 world = inst.model * float4(v.position.xyz, 1.0);
     MTVaryings out;
     out.clipPos = uniforms.viewProj * world;
     out.worldPos = world.xyz;
-    out.normal = (inst.model * float4(v.normal, 0.0)).xyz;
-    out.color = v.color * inst.tint.rgb;
+    out.normal = (inst.model * float4(v.normal.xyz, 0.0)).xyz;
+    out.color = v.color.rgb * inst.tint.rgb;
     return out;
 }
 

@@ -22,15 +22,20 @@ import simd
 /// 36 bytes total). Structure meshes are therefore copied field-by-field in
 /// `buildStructureMeshes` below rather than reinterpreted, so this stays
 /// correct even if the sibling's type ever diverges.
+/// Vertex layout shared with MTShaders.metal. Uses SIMD4 (not SIMD3):
+/// Swift pads SIMD3<Float> to 16 bytes but Metal packs float3 as 12 bytes,
+/// so 3xSIMD3 is 48 bytes in Swift vs 36 bytes in Metal — the shader would
+/// read every vertex after the first from the wrong offset. SIMD4/float4
+/// is 16 bytes on both sides: 48 bytes total, no ambiguity.
 public struct MTVertex {
-    public var position: SIMD3<Float>
-    public var normal: SIMD3<Float>
-    public var color: SIMD3<Float>
+    public var position: SIMD4<Float>  // xyz = position
+    public var normal: SIMD4<Float>    // xyz = normal
+    public var color: SIMD4<Float>     // rgb = color
 
     public init(position: SIMD3<Float>, normal: SIMD3<Float>, color: SIMD3<Float>) {
-        self.position = position
-        self.normal = normal
-        self.color = color
+        self.position = SIMD4<Float>(position, 0)
+        self.normal = SIMD4<Float>(normal, 0)
+        self.color = SIMD4<Float>(color, 1)
     }
 }
 
