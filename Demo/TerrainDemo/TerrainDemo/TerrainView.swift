@@ -54,6 +54,8 @@ struct TerrainView: UIViewRepresentable {
     @Binding var structuresEnabled: Bool
     @Binding var wireframe: Bool
     @Binding var showsWater: Bool
+    @Binding var fogEnabled: Bool
+    @Binding var viewDistance: Int
     /// Updated ~2x/sec with the frame-time EMA.
     @Binding var fps: Double
     /// Mac Catalyst: what mouse-drag does (touch devices always orbit).
@@ -100,6 +102,7 @@ struct TerrainView: UIViewRepresentable {
             seed: .constant(1337), rebuildToken: .constant(0),
             preset: .constant(.default), structuresEnabled: .constant(true),
             wireframe: .constant(false), showsWater: .constant(true),
+            fogEnabled: .constant(true), viewDistance: .constant(6),
             fps: .constant(0), dragMode: .constant(.orbit)
         )
         private var device: MTLDevice?
@@ -110,6 +113,7 @@ struct TerrainView: UIViewRepresentable {
         private var lastToken: Int?
         private var lastPreset: BiomePreset?
         private var lastStructuresEnabled: Bool?
+        private var lastViewDistance: Int?
 
         private var fpsEMA: Double = 60
         private var lastFrameTime: CFTimeInterval = 0
@@ -176,6 +180,11 @@ struct TerrainView: UIViewRepresentable {
             }
             renderer?.wireframe = parent.wireframe
             renderer?.showsWater = parent.showsWater
+            renderer?.fogEnabled = parent.fogEnabled
+            if lastViewDistance != parent.viewDistance {
+                lastViewDistance = parent.viewDistance
+                renderer?.viewDistance = parent.viewDistance
+            }
             // Only write when changed: the setter bumps configVersion, which
             // makes the renderer invalidate all chunk caches. Writing the same
             // value every sync() (2x/sec via the FPS label) caused a perpetual

@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var structuresEnabled = true
     @State private var wireframe = false
     @State private var showsWater = true
+    @State private var fogEnabled = true
+    @State private var viewDistance = 6
     @State private var fps: Double = 0
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
@@ -25,6 +27,8 @@ struct ContentView: View {
                     structuresEnabled: $structuresEnabled,
                     wireframe: $wireframe,
                     showsWater: $showsWater,
+                    fogEnabled: $fogEnabled,
+                    viewDistance: $viewDistance,
                     fps: $fps,
                     dragMode: $dragMode
                 )
@@ -80,6 +84,8 @@ struct ContentView: View {
             structuresEnabled: $structuresEnabled,
             wireframe: $wireframe,
             showsWater: $showsWater,
+            fogEnabled: $fogEnabled,
+            viewDistance: $viewDistance,
             fps: fps,
             dragMode: $dragMode,
             onRegenerate: regenerate

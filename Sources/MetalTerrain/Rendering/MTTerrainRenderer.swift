@@ -105,6 +105,17 @@ public final class MTTerrainRenderer {
 
     public var wireframe: Bool = false
     public var showsWater: Bool = true
+    public var fogEnabled: Bool = true
+    /// Render distance in chunks (radius). Changing this updates the world
+    /// config, which triggers a cache invalidation and rebuild.
+    public var viewDistance: Int {
+        get { world.config.viewDistance }
+        set {
+            var cfg = world.config
+            cfg.viewDistance = newValue
+            world.config = cfg
+        }
+    }
 
     public init(device: MTLDevice, world: MTTerrainWorld) {
         self.device = device
@@ -252,10 +263,13 @@ public final class MTTerrainRenderer {
 
         // 1 draw call per chunk. Iterate under the lock instead of
         // copying to an Array every frame (was a 60fps allocation).
+        // Frustum culling: skip chunks outside the camera view.
         encoder.setRenderPipelineState(terrainPipeline)
         bindUniforms(encoder, slot: terrainSlot)
+        let frustum = Frustum(viewProj: viewProj)
         cacheLock.lock()
         for mesh in chunkCache.values {
+            guard frustum.intersects(min: mesh.boundsMin, max: mesh.boundsMax) else { continue }
             encoder.setVertexBuffer(mesh.vertexBuffer, offset: 0, index: 0)
             encoder.drawIndexedPrimitives(type: .triangle,
                                           indexCount: mesh.indexCount,
@@ -349,6 +363,53 @@ public final class MTTerrainRenderer {
         var indexBuffer: MTLBuffer
         var indexCount: Int
         var lastUsed: TimeInterval
+        /// World-space AABB for frustum culling.
+        var boundsMin: SIMD3<Float>
+        var boundsMax: SIMD3<Float>
+    }
+
+    /// Camera frustum planes extracted from the view-projection matrix.
+    /// Each plane is (normal.xyz, distance): points with dot(n, p) + d > 0
+    /// are inside.
+    private struct Frustum {
+        var planes: [SIMD4<Float>]  // 6 planes: left, right, bottom, top, near, far
+
+        init(viewProj: simd_float4x4) {
+            let m = viewProj
+            // Rows of the matrix (Metal uses column-major storage).
+            let r0 = SIMD4<Float>(m[0][0], m[1][0], m[2][0], m[3][0])
+            let r1 = SIMD4<Float>(m[0][1], m[1][1], m[2][1], m[3][1])
+            let r2 = SIMD4<Float>(m[0][2], m[1][2], m[2][2], m[3][2])
+            let r3 = SIMD4<Float>(m[0][3], m[1][3], m[2][3], m[3][3])
+            planes = [
+                normalizePlane(r3 + r0),  // left
+                normalizePlane(r3 - r0),  // right
+                normalizePlane(r3 + r1),  // bottom
+                normalizePlane(r3 - r1),  // top
+                normalizePlane(r2),       // near (Metal depth is [0,1], not [-1,1])
+                normalizePlane(r3 - r2),  // far
+            ]
+        }
+
+        /// True if the AABB is at least partially inside the frustum.
+        func intersects(min: SIMD3<Float>, max: SIMD3<Float>) -> Bool {
+            for p in planes {
+                let n = SIMD3<Float>(p.x, p.y, p.z)
+                // Positive vertex of the AABB relative to the plane normal.
+                let px = n.x >= 0 ? max.x : min.x
+                let py = n.y >= 0 ? max.y : min.y
+                let pz = n.z >= 0 ? max.z : min.z
+                if n.x * px + n.y * py + n.z * pz + p.w < 0 {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    private static func normalizePlane(_ p: SIMD4<Float>) -> SIMD4<Float> {
+        let len = sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
+        return len > 0 ? p / len : p
     }
     private var chunkCache: [MTChunkCoord: ChunkMesh] = [:]
     private var pendingBuilds = Set<MTChunkCoord>()
@@ -548,11 +609,12 @@ public final class MTTerrainRenderer {
 
     private func writeUniforms(slot: Int, model: simd_float4x4, time: Float) {
         let cfg = world.config
+        let density = fogEnabled ? cfg.fogDensity : 0
         let u = MTUniforms(
             viewProj: viewProj,
             model: model,
             cameraPos: SIMD4<Float>(cameraPos, 1),
-            fogColor: SIMD4<Float>(cfg.fogColor, cfg.fogDensity),
+            fogColor: SIMD4<Float>(cfg.fogColor, density),
             lightDir: SIMD4<Float>(normalize(SIMD3<Float>(0.45, 0.75, 0.35)), 0.38),
             misc: SIMD4<Float>(time, 0, 0, 0)
         )
@@ -594,10 +656,20 @@ public final class MTTerrainRenderer {
             self.cacheLock.lock()
             // Drop stale builds: config changed while we were generating.
             if generation == self.buildGeneration {
-                self.chunkCache[coord] = ChunkMesh(vertexBuffer: vb,
-                                                   indexBuffer: ib,
-                                                   indexCount: mesh.indices.count,
-                                                   lastUsed: Date().timeIntervalSince1970)
+                // AABB for frustum culling: chunk XZ extent, Y from min/max height.
+                let minH = chunk.heights.min() ?? 0
+                let maxH = chunk.heights.max() ?? 1
+                let y0 = self.world.worldY(forHeight: minH)
+                let y1 = self.world.worldY(forHeight: maxH)
+                let x0 = Float(coord.x) * size
+                let z0 = Float(coord.z) * size
+                self.chunkCache[coord] = ChunkMesh(
+                    vertexBuffer: vb,
+                    indexBuffer: ib,
+                    indexCount: mesh.indices.count,
+                    lastUsed: Date().timeIntervalSince1970,
+                    boundsMin: SIMD3<Float>(x0, min(y0, y1) - 20, z0),
+                    boundsMax: SIMD3<Float>(x0 + size, max(y0, y1) + 20, z0 + size))
             }
             self.pendingBuilds.remove(coord)
             self.cacheLock.unlock()
