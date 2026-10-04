@@ -1,0 +1,242 @@
+// MTMeshBuilder.swift — ORIGINAL code for the MetalTerrain library.
+//
+// Turns heightmap chunks into indexed triangle meshes: grid triangulation,
+// per-vertex normals from central differences of the heightfield, and vertex
+// colors from biomes (with border blending and slope-based cliffs).
+
+import simd
+
+// MARK: - Canonical vertex
+
+/// The one shared vertex format for every MetalTerrain mesh.
+///
+/// - position: world-space XYZ (float3)
+/// - normal:   world-space unit normal (float3)
+/// - color:    linear RGB 0...1 (float3)
+///
+/// Layout: three consecutive float3s = 36 bytes, no padding.
+///
+/// NOTE (cross-module contract): the sibling Structures module defines
+/// `MTSimpleVertex { position/normal/color: SIMD3<Float> }`, which is
+/// layout-identical to `MTVertex` (same three float3 fields, same order,
+/// 36 bytes total). Structure meshes are therefore copied field-by-field in
+/// `buildStructureMeshes` below rather than reinterpreted, so this stays
+/// correct even if the sibling's type ever diverges.
+public struct MTVertex {
+    public var position: SIMD3<Float>
+    public var normal: SIMD3<Float>
+    public var color: SIMD3<Float>
+
+    public init(position: SIMD3<Float>, normal: SIMD3<Float>, color: SIMD3<Float>) {
+        self.position = position
+        self.normal = normal
+        self.color = color
+    }
+}
+
+// MARK: - Mesh builder
+
+/// Builds indexed triangle meshes from terrain data. All methods are pure
+/// functions of their inputs and safe to call from a background queue.
+public enum MTMeshBuilder {
+
+    /// Biome colors blend toward the neighboring biome within this normalized
+    /// height distance of a biome border.
+    private static let biomeBlendRange: Float = 0.02
+
+    /// Slopes steeper than this (1 - normal.y) use the biome's slopeColor.
+    private static let cliffSlopeThreshold: Float = 0.55
+
+    // MARK: Terrain
+
+    /// Builds a full-resolution indexed mesh for a chunk.
+    ///
+    /// - Parameters:
+    ///   - chunk: the chunk to mesh (`heights` are normalized 0...1).
+    ///   - world: the world; supplies world-space Y (`worldY(forHeight:)`),
+    ///     biome lookup (`biomeAt(height:)`), and config (chunk size,
+    ///     height scale, sea level).
+    /// - Returns: vertices and `UInt32` indices (two CCW triangles per quad).
+    public static func buildTerrainMesh(
+        chunk: MTChunk,
+        world: MTTerrainWorld
+    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+        buildGrid(chunk: chunk, world: world, stride: 1)
+    }
+
+    /// Builds a mesh for a chunk at a level of detail chosen by
+    /// `distanceFactor` (0 = at the camera, 1 = edge of view distance).
+    /// Beyond 0.5 the grid is built at half resolution (every 2nd vertex).
+    public static func buildLOD(
+        for chunk: MTChunk,
+        world: MTTerrainWorld,
+        distanceFactor: Float
+    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+        buildGrid(chunk: chunk, world: world, stride: distanceFactor > 0.5 ? 2 : 1)
+    }
+
+    // MARK: Water
+
+    /// Builds a flat water plane centered on the XZ origin.
+    ///
+    /// The renderer recenters it on the camera target with a model matrix,
+    /// so the plane itself is built once around (0, 0).
+    public static func buildWaterMesh(
+        size: Float,
+        level: Float,
+        color: SIMD3<Float> = SIMD3<Float>(0.16, 0.42, 0.66)
+    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+        let segments = 16
+        let n = segments + 1
+        var vertices: [MTVertex] = []
+        vertices.reserveCapacity(n * n)
+        for b in 0..<n {
+            for a in 0..<n {
+                let x = (Float(a) / Float(segments) - 0.5) * size
+                let z = (Float(b) / Float(segments) - 0.5) * size
+                vertices.append(MTVertex(
+                    position: SIMD3<Float>(x, level, z),
+                    normal: SIMD3<Float>(0, 1, 0),
+                    color: color
+                ))
+            }
+        }
+        return (vertices, gridIndices(n: n))
+    }
+
+    // MARK: Structures
+
+    /// Builds one low-poly mesh per structure kind by calling into the
+    /// sibling Structures module.
+    ///
+    /// Expected sibling contract (see Structures/MTStructures.swift):
+    /// `MTStructureBuilder.mesh(for: MTStructureKind) -> (vertices: [MTSimpleVertex], indices: [UInt32])`,
+    /// where `MTSimpleVertex` is layout-identical to `MTVertex` (see note on
+    /// `MTVertex`). Vertices are copied field-by-field for safety.
+    public static func buildStructureMeshes(
+        kinds: [MTStructureKind] = MTStructureKind.allCases
+    ) -> [MTStructureKind: (vertices: [MTVertex], indices: [UInt32])] {
+        var out: [MTStructureKind: (vertices: [MTVertex], indices: [UInt32])] = [:]
+        out.reserveCapacity(kinds.count)
+        for kind in kinds {
+            // Cross-module call into the sibling's builder.
+            let mesh = MTStructureBuilder.mesh(for: kind)
+            let verts = mesh.vertices.map {
+                MTVertex(position: $0.position, normal: $0.normal, color: $0.color)
+            }
+            out[kind] = (verts, mesh.indices)
+        }
+        return out
+    }
+
+    // MARK: - Internals
+
+    /// Gridded mesh builder. `stride` picks every stride-th vertex per side
+    /// (1 = full resolution, 2 = half).
+    private static func buildGrid(
+        chunk: MTChunk,
+        world: MTTerrainWorld,
+        stride: Int
+    ) -> (vertices: [MTVertex], indices: [UInt32]) {
+        let res = chunk.resolution
+        precondition(res >= 2, "MTChunk resolution must be >= 2")
+        precondition(chunk.heights.count == res * res,
+                     "MTChunk heights must hold resolution*resolution values")
+
+        let step = max(1, stride)
+        // Vertex count per side at this stride; the far edge always lands on
+        // the chunk border so neighboring chunks stay aligned.
+        let n = (res - 1) / step + 1
+        let cfg = world.config
+        let worldSize = cfg.chunkWorldSize
+        let cell = worldSize / Float(res - 1)   // world units per height sample
+        let originX = Float(chunk.coord.x) * worldSize
+        let originZ = Float(chunk.coord.z) * worldSize
+
+        func h(_ i: Int, _ j: Int) -> Float { chunk.heights[j * res + i] }
+
+        var vertices: [MTVertex] = []
+        vertices.reserveCapacity(n * n)
+        for b in 0..<n {
+            let j = min(b * step, res - 1)
+            for a in 0..<n {
+                let i = min(a * step, res - 1)
+                let height = h(i, j)
+
+                // Central differences of the heightfield -> world-space normal.
+                // One-sided at the chunk border.
+                let iL = max(i - 1, 0), iR = min(i + 1, res - 1)
+                let jD = max(j - 1, 0), jU = min(j + 1, res - 1)
+                let dYdx = cfg.heightScale * (h(iR, j) - h(iL, j)) / (Float(iR - iL) * cell)
+                let dYdz = cfg.heightScale * (h(i, jU) - h(i, jD)) / (Float(jU - jD) * cell)
+                let normal = normalize(SIMD3<Float>(-dYdx, 1.0, -dYdz))
+
+                let wx = originX + Float(i) / Float(res - 1) * worldSize
+                let wz = originZ + Float(j) / Float(res - 1) * worldSize
+                let wy = world.worldY(forHeight: height)
+
+                vertices.append(MTVertex(
+                    position: SIMD3<Float>(wx, wy, wz),
+                    normal: normal,
+                    color: groundColor(height: height, normalY: normal.y, world: world)
+                ))
+            }
+        }
+        return (vertices, gridIndices(n: n))
+    }
+
+    /// Two triangles per quad, wound counter-clockwise seen from +Y so they
+    /// are front-facing with Metal's default frontFace winding.
+    private static func gridIndices(n: Int) -> [UInt32] {
+        var indices: [UInt32] = []
+        indices.reserveCapacity((n - 1) * (n - 1) * 6)
+        for b in 0..<(n - 1) {
+            for a in 0..<(n - 1) {
+                let v00 = UInt32(b * n + a)
+                let v10 = UInt32(b * n + a + 1)
+                let v01 = UInt32((b + 1) * n + a)
+                let v11 = UInt32((b + 1) * n + a + 1)
+                indices.append(contentsOf: [v00, v11, v10, v00, v01, v11])
+            }
+        }
+        return indices
+    }
+
+    /// Vertex color for a terrain sample: biome ground color, blended toward
+    /// the neighboring biome near height borders, overridden by the biome's
+    /// slope color on steep slopes (cliffs).
+    private static func groundColor(
+        height h: Float,
+        normalY: Float,
+        world: MTTerrainWorld
+    ) -> SIMD3<Float> {
+        let biome = world.biomeAt(height: h)
+        let slope = 1.0 - normalY
+        if slope > cliffSlopeThreshold, let cliff = biome.slopeColor {
+            return cliff
+        }
+        var color = biome.groundColor
+        let e = biomeBlendRange
+        if h > biome.maxHeight - e {
+            // Near the top border: blend toward the biome above.
+            let above = world.biomeAt(height: min(h + e, 1.0))
+            if above.name != biome.name {
+                let t = smooth01((biome.maxHeight - h) / e)
+                color = mix(above.groundColor, color, t: t)
+            }
+        } else if h < biome.minHeight + e {
+            // Near the bottom border: blend toward the biome below.
+            let below = world.biomeAt(height: max(h - e, 0.0))
+            if below.name != biome.name {
+                let t = smooth01((h - biome.minHeight) / e)
+                color = mix(below.groundColor, color, t: t)
+            }
+        }
+        return color
+    }
+
+    private static func smooth01(_ t: Float) -> Float {
+        let c = min(max(t, 0), 1)
+        return c * c * (3 - 2 * c)
+    }
+}
