@@ -21,7 +21,7 @@ public struct MTTerrainConfig {
 
     public init(
         chunkResolution: Int = 96,
-        chunkWorldSize: Float = 480,
+        chunkWorldSize: Float = 640,
         viewDistance: Int = 6,
         seaLevel: Float = 0.45,
         heightScale: Float = 220,

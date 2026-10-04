@@ -41,12 +41,12 @@ extension MTBiome {
                     groundColor: SIMD3<Float>(0.25, 0.55, 0.20)),
             MTBiome(name: "forest", minHeight: 0.62, maxHeight: 0.72,
                     groundColor: SIMD3<Float>(0.12, 0.38, 0.12)),
-            MTBiome(name: "mountain", minHeight: 0.72, maxHeight: 0.85,
+            MTBiome(name: "mountain", minHeight: 0.72, maxHeight: 0.80,
                     groundColor: SIMD3<Float>(0.45, 0.42, 0.38),
                     slopeColor: SIMD3<Float>(0.32, 0.30, 0.28)),
-            MTBiome(name: "snowyPeak", minHeight: 0.85, maxHeight: 1.00,
+            MTBiome(name: "snowyPeak", minHeight: 0.80, maxHeight: 1.00,
                     groundColor: SIMD3<Float>(0.90, 0.92, 0.95),
-                    slopeColor: SIMD3<Float>(0.32, 0.30, 0.28)),
+                    slopeColor: SIMD3<Float>(0.55, 0.56, 0.58)),
         ]
     }
 }

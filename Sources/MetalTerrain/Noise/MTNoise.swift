@@ -174,32 +174,48 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     }
 
     // ── Mountain ranges: ridged noise, masked to range bands ──
+    // Only ~35% of land gets mountains; the rest stays as plains/hills.
     var rangeConfig = config
     rangeConfig.octaves = 4
     rangeConfig.ridged = true
     let rangeMask = mtFBMSum(config: continentConfig,
                              nx: (x + 1000) * continentFreq,
                              ny: (y - 1000) * continentFreq, noise: warpNoise)
-    let mountainMask = max(0, min(1, (rangeMask + 0.25) * 1.5))  // 0..1
+    let mountainMask = max(0, min(1, (rangeMask - 0.08) * 2.2))  // 0..1
     let ridged = mtRidgedSum(config: rangeConfig, nx: nx * 1.5, ny: ny * 1.5,
                              noise: noise)
     let mountains = max(0, ridged) * mountainMask * mountainMask
 
-    // ── Rivers: carve valleys where river noise crosses zero ──
+    // ── Rivers: wide carved valleys along low-frequency meanders ──
+    // Lower frequency = longer, more continuous rivers that reach the ocean.
     var riverConfig = config
-    riverConfig.octaves = 2
-    riverConfig.warpStrength = 0.4
-    let riverFreq = config.baseFrequency * 0.5
+    riverConfig.octaves = 3
+    riverConfig.warpStrength = 0
+    let riverFreq = config.baseFrequency * 0.22
+    // Domain-warp the river path so it meanders naturally.
+    let riverWarpX = mtFBMSum(config: continentConfig,
+                              nx: (x + 5000) * continentFreq,
+                              ny: (y + 5000) * continentFreq, noise: warpNoise)
+    let riverWarpY = mtFBMSum(config: continentConfig,
+                              nx: (x - 5000) * continentFreq,
+                              ny: (y - 5000) * continentFreq, noise: noise)
     let riverN = mtFBMSum(config: riverConfig,
-                          nx: (x + 5000) * riverFreq, ny: (y + 5000) * riverFreq,
+                          nx: ((x + riverWarpX * 800) + 5000) * riverFreq,
+                          ny: ((y + riverWarpY * 800) + 5000) * riverFreq,
                           noise: noise)
     let riverDist = abs(riverN)
-    let riverCarve = max(0, 1 - riverDist * 12)  // 1 at center, 0 away
-    let riverCarveMasked = riverCarve * max(0, min(1, (continent + 0.3) * 2))
+    // Wide smooth valley (not a thin line that breaks).
+    let riverCarve = max(0, 1 - riverDist * 6)
+    let riverCarveSmooth = riverCarve * riverCarve * (3 - 2 * riverCarve)
+    let landMask = max(0, min(1, (continent + 0.15) * 3))
+    let riverCarveMasked = riverCarveSmooth * landMask
 
     // ── Combine: continent sets the stage, detail adds texture ──
-    var h = 0.5 + continent * 0.55 + detail * 0.28 + mountains * 0.45
-    h -= riverCarveMasked * 0.22  // carve rivers (only on land)
+    // Plains: flatten detail where mountains are absent.
+    let plainsFlatten = 1 - mountainMask * 0.7
+    var h = 0.5 + continent * 0.55 + detail * 0.28 * plainsFlatten
+    h += mountains * 0.38
+    h -= riverCarveMasked * 0.28  // carve rivers (only on land)
 
     return Float(min(max(h, 0.0), 1.0))
 }
