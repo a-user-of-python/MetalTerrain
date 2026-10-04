@@ -17,6 +17,22 @@ struct ContentView: View {
     @State private var moveInput = SIMD2<Float>(0, 0)
     @State private var sunAzimuth: Float = 45
     @State private var sunElevation: Float = 50
+    // Throttled sun values actually sent to the renderer (slider drags
+    // update the UI instantly but only push to Metal at 15Hz).
+    @State private var sunAzimuthSent: Float = 45
+    @State private var sunElevationSent: Float = 50
+    @State private var sunThrottleWork: DispatchWorkItem?
+
+    /// Push slider values to the renderer at most 15x/sec.
+    private func throttledSunPush() {
+        sunThrottleWork?.cancel()
+        let work = DispatchWorkItem {
+            sunAzimuthSent = sunAzimuth
+            sunElevationSent = sunElevation
+        }
+        sunThrottleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.066, execute: work)
+    }
     @State private var fps: Double = 0
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
@@ -39,10 +55,12 @@ struct ContentView: View {
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
                     moveInput: $moveInput,
-                    sunAzimuth: $sunAzimuth,
-                    sunElevation: $sunElevation
+                    sunAzimuth: $sunAzimuthSent,
+                    sunElevation: $sunElevationSent
                 )
                 .ignoresSafeArea()
+                .onChange(of: sunAzimuth) { throttledSunPush() }
+                .onChange(of: sunElevation) { throttledSunPush() }
 
                 // Show/hide button (top-right, always reachable)
                 VStack {

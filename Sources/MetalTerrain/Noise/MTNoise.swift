@@ -136,13 +136,20 @@ func mtFBM01(config: MTNoiseConfig, x: Double, y: Double,
 /// chunk generation: build the tables once, sample many points).
 func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
                     noise: MTPerlinNoise, warpNoise: MTPerlinNoise) -> Float {
+    // ── Continent layer (very low frequency): large landmasses vs oceans ──
+    var continentConfig = config
+    continentConfig.octaves = 3
+    continentConfig.warpStrength = 0
+    let continentFreq = config.baseFrequency * 0.18
+    let continent = mtFBMSum(config: continentConfig,
+                             nx: x * continentFreq, ny: y * continentFreq,
+                             noise: noise)
+
+    // ── Base detail (current behavior) ──
     var nx = x * config.baseFrequency
     var ny = y * config.baseFrequency
 
     if config.warpStrength > 0 {
-        // Domain warp: sample a low-octave fbm vector field in noise
-        // space and offset the lookup point by it. The warp field is
-        // sampled at warpFrequency (relative to baseFrequency).
         var warpConfig = config
         warpConfig.octaves = 3
         warpConfig.amplitude = 1.0
@@ -159,11 +166,40 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
         ny += config.warpStrength * wy
     }
 
-    let v: Double
+    let detail: Double
     if config.ridged {
-        v = mtRidgedSum(config: config, nx: nx, ny: ny, noise: noise)
+        detail = mtRidgedSum(config: config, nx: nx, ny: ny, noise: noise)
     } else {
-        v = mtFBMSum(config: config, nx: nx, ny: ny, noise: noise)
+        detail = mtFBMSum(config: config, nx: nx, ny: ny, noise: noise)
     }
-    return Float(min(max(0.5 + 0.5 * v, 0.0), 1.0))
+
+    // ── Mountain ranges: ridged noise, masked to range bands ──
+    var rangeConfig = config
+    rangeConfig.octaves = 4
+    rangeConfig.ridged = true
+    let rangeMask = mtFBMSum(config: continentConfig,
+                             nx: (x + 1000) * continentFreq,
+                             ny: (y - 1000) * continentFreq, noise: warpNoise)
+    let mountainMask = max(0, min(1, (rangeMask + 0.25) * 1.5))  // 0..1
+    let ridged = mtRidgedSum(config: rangeConfig, nx: nx * 1.5, ny: ny * 1.5,
+                             noise: noise)
+    let mountains = max(0, ridged) * mountainMask * mountainMask
+
+    // ── Rivers: carve valleys where river noise crosses zero ──
+    var riverConfig = config
+    riverConfig.octaves = 2
+    riverConfig.warpStrength = 0.4
+    let riverFreq = config.baseFrequency * 0.5
+    let riverN = mtFBMSum(config: riverConfig,
+                          nx: (x + 5000) * riverFreq, ny: (y + 5000) * riverFreq,
+                          noise: noise)
+    let riverDist = abs(riverN)
+    let riverCarve = max(0, 1 - riverDist * 12)  // 1 at center, 0 away
+    let riverCarveMasked = riverCarve * max(0, min(1, (continent + 0.3) * 2))
+
+    // ── Combine: continent sets the stage, detail adds texture ──
+    var h = 0.5 + continent * 0.55 + detail * 0.28 + mountains * 0.45
+    h -= riverCarveMasked * 0.22  // carve rivers (only on land)
+
+    return Float(min(max(h, 0.0), 1.0))
 }
