@@ -14,7 +14,36 @@ enum BiomePreset: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// MARK: - Drag mode (Mac Catalyst)
+
+/// On Mac there's no two-finger touch: the user picks what mouse-drag does.
+/// Trackpad pinch still zooms and two-finger trackpad scroll still pans.
+enum DragMode: String, CaseIterable, Identifiable {
+    case orbit = "Orbit"
+    case pan = "Pan"
+
+    var id: String { rawValue }
+}
+
 // MARK: - TerrainView
+
+#if targetEnvironment(macCatalyst)
+/// MTKView subclass so Mac key commands have a UIResponder to land on.
+/// Forwards to the Coordinator (which owns the camera state).
+private final class TerrainMTKView: MTKView {
+    weak var keyTarget: TerrainView.Coordinator?
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    @objc private func keyPanUp() { keyTarget?.keyPanUp() }
+    @objc private func keyPanDown() { keyTarget?.keyPanDown() }
+    @objc private func keyPanLeft() { keyTarget?.keyPanLeft() }
+    @objc private func keyPanRight() { keyTarget?.keyPanRight() }
+    @objc private func keyZoomIn() { keyTarget?.keyZoomIn() }
+    @objc private func keyZoomOut() { keyTarget?.keyZoomOut() }
+    @objc private func keyResetView() { keyTarget?.keyResetView() }
+}
+#endif
 
 /// SwiftUI wrapper around an MTKView that renders a MetalTerrain world.
 struct TerrainView: UIViewRepresentable {
@@ -27,11 +56,17 @@ struct TerrainView: UIViewRepresentable {
     @Binding var showsWater: Bool
     /// Updated ~2x/sec with the frame-time EMA.
     @Binding var fps: Double
+    /// Mac Catalyst: what mouse-drag does (touch devices always orbit).
+    @Binding var dragMode: DragMode
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> MTKView {
+        #if targetEnvironment(macCatalyst)
+        let view = TerrainMTKView()
+        #else
         let view = MTKView()
+        #endif
         view.device = MTLCreateSystemDefaultDevice()
         view.delegate = context.coordinator
         view.preferredFramesPerSecond = 60
@@ -41,6 +76,9 @@ struct TerrainView: UIViewRepresentable {
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.04, green: 0.06, blue: 0.11, alpha: 1.0)
         context.coordinator.attach(to: view, parent: self)
+        #if targetEnvironment(macCatalyst)
+        (view as? TerrainMTKView)?.keyTarget = context.coordinator
+        #endif
         return view
     }
 
@@ -62,7 +100,7 @@ struct TerrainView: UIViewRepresentable {
             seed: .constant(1337), rebuildToken: .constant(0),
             preset: .constant(.default), structuresEnabled: .constant(true),
             wireframe: .constant(false), showsWater: .constant(true),
-            fps: .constant(0)
+            fps: .constant(0), dragMode: .constant(.orbit)
         )
         private var device: MTLDevice?
         private var world: MTTerrainWorld?
@@ -98,6 +136,31 @@ struct TerrainView: UIViewRepresentable {
             let reset = UITapGestureRecognizer(target: self, action: #selector(handleReset(_:)))
             reset.numberOfTapsRequired = 2
             view.addGestureRecognizer(reset)
+
+            #if targetEnvironment(macCatalyst)
+            // Mac keyboard controls: arrows pan, +/- zoom, 0 resets.
+            // (Trackpad pinch/scroll already work via the recognizers above.)
+            view.addKeyCommand(UIKeyCommand(input: UIKeyCommand.inputUpArrow,
+                                            modifierFlags: [],
+                                            action: #selector(keyPanUp)))
+            view.addKeyCommand(UIKeyCommand(input: UIKeyCommand.inputDownArrow,
+                                            modifierFlags: [],
+                                            action: #selector(keyPanDown)))
+            view.addKeyCommand(UIKeyCommand(input: UIKeyCommand.inputLeftArrow,
+                                            modifierFlags: [],
+                                            action: #selector(keyPanLeft)))
+            view.addKeyCommand(UIKeyCommand(input: UIKeyCommand.inputRightArrow,
+                                            modifierFlags: [],
+                                            action: #selector(keyPanRight)))
+            view.addKeyCommand(UIKeyCommand(input: "+", modifierFlags: [],
+                                            action: #selector(keyZoomIn)))
+            view.addKeyCommand(UIKeyCommand(input: "-", modifierFlags: [],
+                                            action: #selector(keyZoomOut)))
+            view.addKeyCommand(UIKeyCommand(input: "0", modifierFlags: [],
+                                            action: #selector(keyResetView)))
+            // Key commands need first responder.
+            DispatchQueue.main.async { view.becomeFirstResponder() }
+            #endif
         }
 
         /// Applies SwiftUI state to the Metal objects. Rebuilds the world only
@@ -191,9 +254,17 @@ struct TerrainView: UIViewRepresentable {
 
         // MARK: - Gestures
 
-        /// Single-finger drag: orbit (yaw / pitch).
+        /// Single-finger drag: orbit (yaw / pitch) — or pan when the Mac
+        /// drag-mode picker is set to Pan. Mouse drag on Catalyst fires this
+        /// recognizer, so it doubles as the Mac orbit control.
         @objc private func handleOrbit(_ g: UIPanGestureRecognizer) {
             guard let v = g.view else { return }
+            #if targetEnvironment(macCatalyst)
+            if parent.dragMode == .pan {
+                handlePan(g)
+                return
+            }
+            #endif
             let t = g.translation(in: v)
             yaw -= Float(t.x * 0.0055)
             pitch = min(1.35, max(0.08, pitch - Float(t.y * 0.0055)))
@@ -224,6 +295,31 @@ struct TerrainView: UIViewRepresentable {
             distance = 340
             target = SIMD3<Float>(0, 0, 0)
         }
+
+        #if targetEnvironment(macCatalyst)
+        // MARK: - Mac keyboard controls
+        // (Called by TerrainMTKView, which owns the UIResponder slot.)
+
+        func panTarget(dx: Float, dy: Float) {
+            let s: Float = distance * 0.08
+            let right = SIMD3<Float>(cos(yaw), 0, -sin(yaw))
+            let fwd = SIMD3<Float>(sin(yaw), 0, cos(yaw))
+            target += (dx * right + dy * fwd) * s
+        }
+
+        func keyPanUp() { panTarget(dx: 0, dy: 1) }
+        func keyPanDown() { panTarget(dx: 0, dy: -1) }
+        func keyPanLeft() { panTarget(dx: -1, dy: 0) }
+        func keyPanRight() { panTarget(dx: 1, dy: 0) }
+        func keyZoomIn() { distance = max(40, distance * 0.9) }
+        func keyZoomOut() { distance = min(1200, distance * 1.1) }
+        func keyResetView() {
+            yaw = -0.6
+            pitch = 0.62
+            distance = 340
+            target = SIMD3<Float>(0, 0, 0)
+        }
+        #endif
     }
 }
 

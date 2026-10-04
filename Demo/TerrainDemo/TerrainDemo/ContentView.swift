@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var showsWater = true
     @State private var fps: Double = 0
     @State private var panelVisible = true
+    @State private var dragMode: DragMode = .orbit
 
     var body: some View {
         GeometryReader { geo in
@@ -24,7 +25,8 @@ struct ContentView: View {
                     structuresEnabled: $structuresEnabled,
                     wireframe: $wireframe,
                     showsWater: $showsWater,
-                    fps: $fps
+                    fps: $fps,
+                    dragMode: $dragMode
                 )
                 .ignoresSafeArea()
 
@@ -79,6 +81,7 @@ struct ContentView: View {
             wireframe: $wireframe,
             showsWater: $showsWater,
             fps: fps,
+            dragMode: $dragMode,
             onRegenerate: regenerate
         )
     }

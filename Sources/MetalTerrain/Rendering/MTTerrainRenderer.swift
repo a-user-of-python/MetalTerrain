@@ -63,24 +63,23 @@ private func mtUniformScale(_ s: Float) -> simd_float4x4 {
 // MARK: - Shader-visible structs
 
 /// Must match `MTUniforms` in MTShaders.metal (192 bytes).
+/// Uniform block uploaded per frame. 192 bytes, all 16-byte aligned.
+/// Swift's `SIMD3<Float>` is 16-byte aligned (unlike Metal's 12-byte
+/// `float3`), so small fields are packed into `SIMD4`s to keep the layout
+/// identical on both sides. Must match `MTUniforms` in MTShaders.metal.
 private struct MTUniforms {
     var viewProj: simd_float4x4
     var model: simd_float4x4
-    var cameraPos: SIMD3<Float>
-    var _pad0: Float = 0
-    var fogColor: SIMD3<Float>
-    var fogDensity: Float
-    var lightDir: SIMD3<Float>
-    var ambient: Float = 0.38
-    var time: Float = 0
-    var _pad1: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
+    var cameraPos: SIMD4<Float>  // xyz = camera position
+    var fogColor: SIMD4<Float>   // rgb = fog color, w = fog density
+    var lightDir: SIMD4<Float>   // xyz = light direction, w = ambient
+    var misc: SIMD4<Float>       // x = time seconds
 }
 
 /// Must match `MTInstanceData` in MTShaders.metal (80 bytes).
 private struct MTInstanceData {
     var model: simd_float4x4
-    var tint: SIMD3<Float>
-    var pad: Float = 0
+    var tint: SIMD4<Float>  // rgb = color tint
 }
 
 // MARK: - Renderer
@@ -138,6 +137,14 @@ public final class MTTerrainRenderer {
     /// ever grows/shrinks by finished meshes, so `draw` never blocks.
     public func update(cameraTarget: SIMD2<Float>) {
         lastCameraTarget = cameraTarget
+        // If the user replaced `world.config`, drop stale chunk meshes and
+        // rebuild the water plane (its size/level come from the config).
+        let version = world.configVersion
+        if version != lastConfigVersion {
+            lastConfigVersion = version
+            invalidateCaches()
+            buildWaterMesh()
+        }
         let cfg = world.config
         let size = cfg.chunkWorldSize
         let radius = cfg.viewDistance
@@ -208,6 +215,12 @@ public final class MTTerrainRenderer {
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass)
         else { return }
+
+        // Wait for an in-flight frame to finish before reusing its slot.
+        frameSemaphore.wait()
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.frameSemaphore.signal()
+        }
 
         frameIndex = (frameIndex + 1) % maxFramesInFlight
         let terrainSlot = frameIndex * slotsPerFrame
@@ -295,11 +308,16 @@ public final class MTTerrainRenderer {
     private var viewProj = matrix_identity_float4x4
     private var cameraPos = SIMD3<Float>(0, 0, 0)
     private var lastCameraTarget = SIMD2<Float>(0, 0)
+    private var lastConfigVersion: UInt64 = 0
     private let waterAlpha: Float = 0.82
     private let startTime = Date()
 
     // Triple-buffered uniforms; two slots per frame (terrain + water).
+    // The semaphore guarantees the CPU never overwrites a uniform slot
+    // the GPU is still reading (without it, a fast CPU can lap the GPU
+    // and corrupt in-flight uniforms).
     private let maxFramesInFlight = 3
+    private let frameSemaphore = DispatchSemaphore(value: 3)
     private let slotsPerFrame = 2
     private let uniformStride: Int
     private var uniformBuffer: MTLBuffer!
@@ -349,7 +367,10 @@ public final class MTTerrainRenderer {
 
     private func buildPipelines() {
         let library = defaultLibrary()
-        if #available(iOS 26, *), buildMetal4Pipelines(library: library) {
+        // On Catalyst, iOS 26 maps to macOS 26 (Tahoe). Intel Macs cap at
+        // macOS 15, so this is false there and we cleanly take Metal 3.
+        // The macOS clause covers native macOS apps using the SwiftPM package.
+        if #available(iOS 26, macOS 26, *), buildMetal4Pipelines(library: library) {
             usesMetal4 = true
             return
         }
@@ -392,16 +413,16 @@ public final class MTTerrainRenderer {
         }
     }
 
-    /// Metal 4 fast path (iOS 26+). Compiles the same shaders through
+    /// Metal 4 fast path (iOS 26+ / macOS 26+). Compiles the same shaders through
     /// `MTL4Compiler` (dedicated compilation context, shared Metal IR)
     /// instead of the device. Best-effort: any failure returns false and the
     /// caller falls back to the Metal 3 path — this never crashes on older OS
-    /// because the whole method is gated by `@available(iOS 26, *)`.
+    /// because the whole method is gated by `@available(iOS 26, macOS 26, *)`.
     ///
     /// API names verified against Apple's metal-cpp headers (MTL4Compiler,
     /// MTL4RenderPipelineDescriptor, MTL4LibraryFunctionDescriptor); re-check
     /// against the iOS 26 SDK if behavior differs.
-    @available(iOS 26, *)
+    @available(iOS 26, macOS 26, *)
     private func buildMetal4Pipelines(library: MTLLibrary) -> Bool {
         do {
             let compiler = try device.makeCompiler(descriptor: MTL4CompilerDescriptor())
@@ -423,7 +444,7 @@ public final class MTTerrainRenderer {
         }
     }
 
-    @available(iOS 26, *)
+    @available(iOS 26, macOS 26, *)
     private func metal4Pipeline(compiler: MTL4Compiler,
                                 library: MTLLibrary,
                                 vertex: String,
@@ -491,11 +512,10 @@ public final class MTTerrainRenderer {
         let u = MTUniforms(
             viewProj: viewProj,
             model: model,
-            cameraPos: cameraPos,
-            fogColor: cfg.fogColor,
-            fogDensity: cfg.fogDensity,
-            lightDir: normalize(SIMD3<Float>(0.45, 0.75, 0.35)),
-            time: Float(Date().timeIntervalSince(startTime))
+            cameraPos: SIMD4<Float>(cameraPos, 1),
+            fogColor: SIMD4<Float>(cfg.fogColor, cfg.fogDensity),
+            lightDir: SIMD4<Float>(normalize(SIMD3<Float>(0.45, 0.75, 0.35)), 0.38),
+            misc: SIMD4<Float>(Float(Date().timeIntervalSince(startTime)), 0, 0, 0)
         )
         var copy = u
         let dst = uniformBuffer.contents().advanced(by: slot * uniformStride)
@@ -589,14 +609,17 @@ public final class MTTerrainRenderer {
     /// changes, not every frame.
     private func rebuildStructureInstances(visible: Set<MTChunkCoord>) {
         var perKind: [MTStructureKind: [MTInstanceData]] = [:]
-        for coord in visible {
+        // Sort for deterministic instance-buffer order: Swift Set iteration
+        // is randomized per run, which would make "same seed = same bytes"
+        // false at the buffer level.
+        for coord in visible.sorted() {
             for placement in world.structures(in: coord) {
                 let model = mtTranslation(placement.position)
                     * mtRotationY(placement.rotationY)
                     * mtUniformScale(placement.scale)
                 perKind[placement.kind, default: []].append(
                     MTInstanceData(model: model,
-                                   tint: SIMD3<Float>(1, 1, 1)))
+                                   tint: SIMD4<Float>(1, 1, 1, 1)))
             }
         }
         for kind in MTStructureKind.allCases {

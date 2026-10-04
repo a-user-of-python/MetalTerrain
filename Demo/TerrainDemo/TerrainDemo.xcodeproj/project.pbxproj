@@ -272,6 +272,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.TerrainDemo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				// Mac Catalyst: one target runs on Intel + Apple Silicon Macs.
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -304,6 +306,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.TerrainDemo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				// Mac Catalyst: one target runs on Intel + Apple Silicon Macs.
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";

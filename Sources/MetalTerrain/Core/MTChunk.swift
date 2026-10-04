@@ -5,13 +5,17 @@ import Foundation
 
 /// Integer chunk coordinate. Chunk (x, z) covers the world-space rect
 /// `[x * chunkWorldSize, (x+1) * chunkWorldSize)` on X and likewise on Z.
-public struct MTChunkCoord: Hashable {
+public struct MTChunkCoord: Hashable, Comparable {
     public var x: Int
     public var z: Int
 
     public init(x: Int, z: Int) {
         self.x = x
         self.z = z
+    }
+
+    public static func < (lhs: MTChunkCoord, rhs: MTChunkCoord) -> Bool {
+        (lhs.x, lhs.z) < (rhs.x, rhs.z)
     }
 }
 

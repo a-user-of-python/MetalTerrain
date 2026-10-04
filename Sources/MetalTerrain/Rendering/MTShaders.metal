@@ -16,24 +16,22 @@ struct MTVertexIn {
 };
 
 // Must match MTUniforms in MTTerrainRenderer.swift (192 bytes).
+// Uses float4 packing on both sides: Swift's SIMD3<Float> is 16-byte
+// aligned (unlike Metal's 12-byte float3), so float3 fields would desync
+// the layout. Pack small fields into float4s instead.
 struct MTUniforms {
     float4x4 viewProj;
     float4x4 model;
-    float3 cameraPos;
-    float _pad0;
-    float3 fogColor;
-    float fogDensity;
-    float3 lightDir;
-    float ambient;
-    float time;
-    float3 _pad1;
+    float4 cameraPos;   // xyz = camera position
+    float4 fogColor;    // rgb = fog color, w = fog density
+    float4 lightDir;    // xyz = light direction, w = ambient strength
+    float4 misc;        // x = time seconds
 };
 
 // Must match MTInstanceData in MTTerrainRenderer.swift (80 bytes).
 struct MTInstanceData {
     float4x4 model;
-    float3 tint;
-    float pad;
+    float4 tint;        // rgb = color tint
 };
 
 struct MTVaryings {
@@ -63,11 +61,13 @@ float3 applyLighting(float3 albedo,
                      float3 worldPos,
                      constant MTUniforms &uniforms) {
     float3 n = normalize(normal);
-    float ndl = max(dot(n, uniforms.lightDir), 0.0);
-    float3 lit = albedo * (uniforms.ambient + ndl * (1.0 - uniforms.ambient));
-    float dist = distance(worldPos, uniforms.cameraPos);
-    float f = 1.0 - exp(-uniforms.fogDensity * uniforms.fogDensity * dist * dist);
-    return mix(lit, uniforms.fogColor, clamp(f, 0.0, 1.0));
+    float ndl = max(dot(n, uniforms.lightDir.xyz), 0.0);
+    float amb = uniforms.lightDir.w;
+    float3 lit = albedo * (amb + ndl * (1.0 - amb));
+    float dist = distance(worldPos, uniforms.cameraPos.xyz);
+    float dens = uniforms.fogColor.w;
+    float f = 1.0 - exp(-dens * dens * dist * dist);
+    return mix(lit, uniforms.fogColor.rgb, clamp(f, 0.0, 1.0));
 }
 
 fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
@@ -80,9 +80,10 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
 fragment float4 water_fragment(MTVaryings in [[stage_in]],
                                constant MTUniforms &uniforms [[buffer(1)]],
                                constant float &alpha [[buffer(2)]]) {
-    float3 ripple = float3(0.03 * sin(uniforms.time * 1.7 + in.worldPos.x * 0.35),
+    float t = uniforms.misc.x;
+    float3 ripple = float3(0.03 * sin(t * 1.7 + in.worldPos.x * 0.35),
                            0.0,
-                           0.03 * cos(uniforms.time * 1.3 + in.worldPos.z * 0.31));
+                           0.03 * cos(t * 1.3 + in.worldPos.z * 0.31));
     float3 n = normalize(in.normal + ripple);
     float3 col = applyLighting(in.color, n, in.worldPos, uniforms);
     return float4(col, alpha);
@@ -101,7 +102,7 @@ vertex MTVaryings structure_vertex(const device MTVertexIn *vertices [[buffer(0)
     out.clipPos = uniforms.viewProj * world;
     out.worldPos = world.xyz;
     out.normal = (inst.model * float4(v.normal, 0.0)).xyz;
-    out.color = v.color * inst.tint;
+    out.color = v.color * inst.tint.rgb;
     return out;
 }
 

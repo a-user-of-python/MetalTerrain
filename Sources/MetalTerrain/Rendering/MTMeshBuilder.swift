@@ -144,8 +144,10 @@ public enum MTMeshBuilder {
                      "MTChunk heights must hold resolution*resolution values")
 
         let step = max(1, stride)
-        // Vertex count per side at this stride; the far edge always lands on
-        // the chunk border so neighboring chunks stay aligned.
+        // Vertex count per side at this stride. The far edge always lands
+        // exactly on the chunk border (res - 1) so neighboring chunks stay
+        // aligned — the last strip may be narrower than `step`, which is
+        // fine, but a missing border vertex would open a visible crack.
         let n = (res - 1) / step + 1
         let cfg = world.config
         let worldSize = cfg.chunkWorldSize
@@ -158,9 +160,10 @@ public enum MTMeshBuilder {
         var vertices: [MTVertex] = []
         vertices.reserveCapacity(n * n)
         for b in 0..<n {
-            let j = min(b * step, res - 1)
+            // Clamp the final row/column onto the chunk border.
+            let j = (b == n - 1) ? res - 1 : b * step
             for a in 0..<n {
-                let i = min(a * step, res - 1)
+                let i = (a == n - 1) ? res - 1 : a * step
                 let height = h(i, j)
 
                 // Central differences of the heightfield -> world-space normal.
@@ -232,7 +235,18 @@ public enum MTMeshBuilder {
                 color = mix(below.groundColor, color, t: t)
             }
         }
+        // Emissive biomes (e.g. alien crystal fields) glow: boost the vertex
+        // color so the lighting pass reads them as self-lit.
+        if biome.emitsLight {
+            color = min(color * 1.6 + SIMD3<Float>(repeating: 0.12),
+                        SIMD3<Float>(repeating: 1.0))
+        }
         return color
+    }
+
+    /// Linear interpolation for SIMD3 colors (Metal's `mix` has no Swift equivalent).
+    private static func mix(_ a: SIMD3<Float>, _ b: SIMD3<Float>, t: Float) -> SIMD3<Float> {
+        a + (b - a) * t
     }
 
     private static func smooth01(_ t: Float) -> Float {

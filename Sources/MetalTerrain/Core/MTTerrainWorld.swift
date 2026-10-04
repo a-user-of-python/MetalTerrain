@@ -10,15 +10,67 @@ import Foundation
 
 /// Seeded infinite 3D heightmap terrain world. Matches DESIGN.md exactly.
 public final class MTTerrainWorld {
+    // All mutable state is protected by `stateLock`: `config` and `seed`
+    // are read from background chunk-build queues while the main thread
+    // may write them.
+    private let stateLock = NSLock()
+    private var _config: MTTerrainConfig
+    private var _seed: UInt64
+
     /// Live configuration (noise knobs, biomes, structure toggle, ...).
-    public var config: MTTerrainConfig
+    /// Thread-safe. Setting it bumps `configVersion` so renderers can
+    /// invalidate their caches.
+    public var config: MTTerrainConfig {
+        get { stateLock.withLock { _config } }
+        set {
+            stateLock.withLock {
+                _config = newValue
+                _configVersion &+= 1
+            }
+        }
+    }
     /// World seed. Height, chunk, and structure queries are pure
-    /// functions of this seed plus `config`.
-    public var seed: UInt64
+    /// functions of this seed plus `config`. Thread-safe.
+    public var seed: UInt64 {
+        get { stateLock.withLock { _seed } }
+        set { stateLock.withLock { _seed = newValue } }
+    }
+    /// Incremented every time `config` is set. Renderers snapshot this in
+    /// `update()` and rebuild caches + water when it changes.
+    public var configVersion: UInt64 {
+        stateLock.withLock { _configVersion }
+    }
+    private var _configVersion: UInt64 = 0
 
     /// Custom biomes added via `setBiome`, in insertion order.
     /// These take precedence over `config.biomes` in `biomeAt`.
     private var customBiomes: [MTBiome] = []
+
+    // Cached noise tables, keyed by seed. Building the 256-entry
+    // permutation tables is the most expensive part of a height query;
+    // without this cache, `heightAt` (and every chunk build) pays for
+    // two Fisher-Yates shuffles per call.
+    private let noiseLock = NSLock()
+    private var cachedNoiseSeed: UInt64?
+    private var cachedNoise: MTPerlinNoise?
+    private var cachedWarpNoise: MTPerlinNoise?
+
+    /// Returns the (base, warp) noise tables for the current seed,
+    /// building them once and reusing them until the seed changes.
+    /// Thread-safe: concurrent callers may build duplicate tables once,
+    /// but never observe a torn pair.
+    private func noisePair() -> (MTPerlinNoise, MTPerlinNoise) {
+        let currentSeed = seed  // single locked read; seed can't change mid-build
+        noiseLock.lock()
+        if cachedNoiseSeed != currentSeed || cachedNoise == nil {
+            cachedNoise = MTPerlinNoise(seed: currentSeed)
+            cachedWarpNoise = MTPerlinNoise(seed: currentSeed ^ Self.warpSeedXor)
+            cachedNoiseSeed = currentSeed
+        }
+        let pair = (cachedNoise!, cachedWarpNoise!)
+        noiseLock.unlock()
+        return pair
+    }
 
     // Domain separation constants for the independent noise fields.
     private static let warpSeedXor: UInt64 = 0x9E3779B97F4A7C15
@@ -29,8 +81,8 @@ public final class MTTerrainWorld {
     private static let chunkSeedC: UInt64 = 0xA24BAED4963EE407
 
     public init(seed: UInt64, config: MTTerrainConfig = .default) {
-        self.seed = seed
-        self.config = config
+        self._seed = seed
+        self._config = config
     }
 
     // MARK: - Height
@@ -39,8 +91,7 @@ public final class MTTerrainWorld {
     /// Domain-warped fbm (or ridged, per `config.noise.ridged`).
     /// Pure function of seed + config.
     public func heightAt(x: Double, z: Double) -> Float {
-        let noise = MTPerlinNoise(seed: seed)
-        let warpNoise = MTPerlinNoise(seed: seed ^ Self.warpSeedXor)
+        let (noise, warpNoise) = noisePair()
         return mtHeightSample(x: x, y: z, config: config.noise,
                               noise: noise, warpNoise: warpNoise)
     }
@@ -102,19 +153,20 @@ public final class MTTerrainWorld {
     public func generateChunk(at coord: MTChunkCoord) -> MTChunk {
         let res = max(2, config.chunkResolution)
         let size = config.chunkWorldSize
-        let x0 = Float(coord.x) * size
-        let z0 = Float(coord.z) * size
-        let step = size / Float(res - 1)
+        // Compute the chunk origin in Double: Float's 24-bit mantissa loses
+        // integer precision past ~16M, which would misalign distant chunks.
+        let x0 = Double(coord.x) * Double(size)
+        let z0 = Double(coord.z) * Double(size)
+        let step = Double(size) / Double(res - 1)
 
-        // Build the noise tables once per chunk, then sample the grid.
-        let noise = MTPerlinNoise(seed: seed)
-        let warpNoise = MTPerlinNoise(seed: seed ^ Self.warpSeedXor)
+        // Reuse the cached noise tables (built once per seed).
+        let (noise, warpNoise) = noisePair()
 
         var heights = [Float](repeating: 0, count: res * res)
         for iz in 0..<res {
-            let wz = Double(z0 + Float(iz) * step)
+            let wz = z0 + Double(iz) * step
             for ix in 0..<res {
-                let wx = Double(x0 + Float(ix) * step)
+                let wx = x0 + Double(ix) * step
                 heights[iz * res + ix] = mtHeightSample(
                     x: wx, y: wz, config: config.noise,
                     noise: noise, warpNoise: warpNoise)
@@ -154,7 +206,8 @@ public final class MTTerrainWorld {
         // Higher density -> lower keep threshold -> more structures.
         let threshold = 1.0 - Double(config.structureDensity)
         let beachTop: Float =
-            config.biomes.first(where: { $0.name == "beach" })?.maxHeight
+            customBiomes.first(where: { $0.name == "beach" })?.maxHeight
+            ?? config.biomes.first(where: { $0.name == "beach" })?.maxHeight
             ?? (config.seaLevel + 0.04)
 
         var out: [MTStructurePlacement] = []

@@ -238,14 +238,17 @@ private struct MTMeshAccumulator {
                                   color: SIMD3<Float>) {
         var rng = MTSeededRandom(seed: seed)
         // radii[j][i]: j = 0 (top pole) ... latBands (bottom pole),
-        // i = 0 ... lonSegments (seam duplicated).
+        // i = 0 ... lonSegments. The seam column (i = lonSegments) duplicates
+        // i = 0 exactly — independent randoms there would leave a visible
+        // crack where phi wraps from 2π back to 0.
         var radii: [[Float]] = []
         for _ in 0...latBands {
             var row: [Float] = []
-            for _ in 0...lonSegments {
+            for _ in 0..<lonSegments {
                 row.append(radius * (1 + displacement
                     * (rng.nextFloat() * 2 - 1)))
             }
+            row.append(row[0])  // close the seam
             radii.append(row)
         }
         func point(j: Int, i: Int) -> SIMD3<Float> {

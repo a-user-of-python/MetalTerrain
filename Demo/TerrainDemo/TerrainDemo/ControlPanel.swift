@@ -9,6 +9,7 @@ struct ControlPanel: View {
     @Binding var wireframe: Bool
     @Binding var showsWater: Bool
     var fps: Double
+    @Binding var dragMode: DragMode
     var onRegenerate: () -> Void
 
     var body: some View {
@@ -59,6 +60,23 @@ struct ControlPanel: View {
                 .font(.title3)
             Toggle("Water", isOn: $showsWater)
                 .font(.title3)
+
+            // Mac: pick what mouse-drag does (no two-finger touch on desktop).
+            #if targetEnvironment(macCatalyst)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Mouse drag")
+                    .font(.title3)
+                Picker("Mouse drag", selection: $dragMode) {
+                    ForEach(DragMode.allCases) { m in
+                        Text(m.rawValue).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Arrows pan · +/− zoom · 0 resets · trackpad pinch zooms")
+                    .font(.callout)
+                    .opacity(0.75)
+            }
+            #endif
 
             // FPS readout
             Text("\(Int(fps)) FPS")
