@@ -72,7 +72,14 @@ float3 applyLighting(float3 albedo,
 
 fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
                                  constant MTUniforms &uniforms [[buffer(1)]]) {
-    float3 col = applyLighting(in.color, in.normal, in.worldPos, uniforms);
+    // Per-pixel detail: subtle high-frequency variation breaks up the flat
+    // look of per-vertex biome colors. Uses a cheap hash-based value noise.
+    float3 p = in.worldPos * 0.35;
+    float n = fract(sin(dot(floor(p.xz), float2(12.9898, 78.233))) * 43758.5453);
+    float n2 = fract(sin(dot(floor(p.xz) + 1.0, float2(12.9898, 78.233))) * 43758.5453);
+    float detail = mix(n, n2, 0.5) - 0.5;  // -0.5 ... 0.5
+    float3 varied = in.color * (1.0 + detail * 0.12);
+    float3 col = applyLighting(varied, in.normal, in.worldPos, uniforms);
     return float4(col, 1.0);
 }
 
