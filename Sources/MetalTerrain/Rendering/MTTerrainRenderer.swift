@@ -115,6 +115,9 @@ public final class MTTerrainRenderer {
         self.commandQueue = queue
         self.uniformStride = MemoryLayout<MTUniforms>.stride
         precondition(uniformStride == 192, "MTUniforms layout drifted from MTShaders.metal")
+        // Metal requires buffer offsets bound via setVertexBuffer/setFragmentBuffer
+        // to be multiples of 256. MTUniforms is 192 bytes, so pad the stride.
+        self.uniformStrideAligned = (uniformStride + 255) & ~255
 
         buildPipelines()
         buildDepthStates()
@@ -330,6 +333,8 @@ public final class MTTerrainRenderer {
     private let frameSemaphore = DispatchSemaphore(value: 3)
     private let slotsPerFrame = 2
     private let uniformStride: Int
+    /// 256-byte aligned stride for buffer offsets (Metal requirement).
+    private let uniformStrideAligned: Int
     private var uniformBuffer: MTLBuffer!
     private var frameIndex = 0
 
@@ -528,7 +533,7 @@ public final class MTTerrainRenderer {
     // MARK: Uniforms
 
     private func buildUniformBuffer() {
-        let length = uniformStride * maxFramesInFlight * slotsPerFrame
+        let length = uniformStrideAligned * maxFramesInFlight * slotsPerFrame
         guard let buf = device.makeBuffer(length: length, options: .storageModeShared) else {
             preconditionFailure("MTTerrainRenderer: uniform buffer allocation failed")
         }
@@ -546,13 +551,13 @@ public final class MTTerrainRenderer {
             misc: SIMD4<Float>(Float(Date().timeIntervalSince(startTime)), 0, 0, 0)
         )
         var copy = u
-        let dst = uniformBuffer.contents().advanced(by: slot * uniformStride)
+        let dst = uniformBuffer.contents().advanced(by: slot * uniformStrideAligned)
         dst.copyMemory(from: &copy, byteCount: uniformStride)
     }
 
     private func bindUniforms(_ encoder: MTLRenderCommandEncoder, slot: Int) {
-        encoder.setVertexBuffer(uniformBuffer, offset: slot * uniformStride, index: 1)
-        encoder.setFragmentBuffer(uniformBuffer, offset: slot * uniformStride, index: 1)
+        encoder.setVertexBuffer(uniformBuffer, offset: slot * uniformStrideAligned, index: 1)
+        encoder.setFragmentBuffer(uniformBuffer, offset: slot * uniformStrideAligned, index: 1)
     }
 
     // MARK: Chunk streaming
