@@ -204,7 +204,9 @@ public enum MTMeshBuilder {
                 let v10 = UInt32(b * n + a + 1)
                 let v01 = UInt32((b + 1) * n + a)
                 let v11 = UInt32((b + 1) * n + a + 1)
-                indices.append(contentsOf: [v00, v11, v10, v00, v01, v11])
+                // Counter-clockwise when viewed from +Y (above): Metal's
+                // front face. Was clockwise -> terrain invisible from above.
+                indices.append(contentsOf: [v00, v10, v11, v00, v11, v01])
             }
         }
         return indices
