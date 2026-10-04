@@ -11,7 +11,7 @@
 		A30000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000011 /* ContentView.swift */; };
 		A30000000000000000000022 /* TerrainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000012 /* TerrainView.swift */; };
 		A30000000000000000000023 /* ControlPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000013 /* ControlPanel.swift */; };
-		A30000000000000000000024 /* JoystickView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000014 /* JoystickView.swift */; };
+		A30000000000000000000025 /* JoystickView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000015 /* JoystickView.swift */; };
 		A30000000000000000000024 /* MetalTerrain in Frameworks */ = {isa = PBXBuildFile; productRef = A40000000000000000000002 /* MetalTerrain */; };
 /* End PBXBuildFile section */
 
@@ -21,7 +21,7 @@
 		A30000000000000000000011 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A30000000000000000000012 /* TerrainView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TerrainView.swift; sourceTree = "<group>"; };
 		A30000000000000000000013 /* ControlPanel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ControlPanel.swift; sourceTree = "<group>"; };
-		A30000000000000000000014 /* JoystickView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = JoystickView.swift; sourceTree = "<group>"; };
+		A30000000000000000000015 /* JoystickView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = JoystickView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,7 +59,7 @@
 				A30000000000000000000011 /* ContentView.swift */,
 				A30000000000000000000012 /* TerrainView.swift */,
 				A30000000000000000000013 /* ControlPanel.swift */,
-				A30000000000000000000014 /* JoystickView.swift */,
+				A30000000000000000000015 /* JoystickView.swift */,
 			);
 			path = TerrainDemo;
 			sourceTree = "<group>";
@@ -137,7 +137,7 @@
 				A30000000000000000000021 /* ContentView.swift in Sources */,
 				A30000000000000000000022 /* TerrainView.swift in Sources */,
 				A30000000000000000000023 /* ControlPanel.swift in Sources */,
-				A30000000000000000000024 /* JoystickView.swift in Sources */,
+				A30000000000000000000025 /* JoystickView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
