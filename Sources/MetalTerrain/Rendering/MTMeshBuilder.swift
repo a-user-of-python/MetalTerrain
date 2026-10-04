@@ -244,7 +244,6 @@ public enum MTMeshBuilder {
             indices.append(contentsOf: [vi, vj, sj, vi, sj, si])
         }
     }
-    }
 
     /// Two triangles per quad, wound counter-clockwise seen from +Y so they
     /// are front-facing with Metal's default frontFace winding.
