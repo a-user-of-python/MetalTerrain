@@ -40,8 +40,6 @@ struct ContentView: View {
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
                     moveInput: $moveInput,
-                    sunAzimuth: .constant(45),
-                    sunElevation: .constant(50),
                     onRendererReady: { terrainRenderer = $0 }
                 )
                 .ignoresSafeArea()
