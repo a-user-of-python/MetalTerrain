@@ -367,13 +367,14 @@ public final class MTTerrainRenderer {
 
     private func buildPipelines() {
         let library = defaultLibrary()
-        // On Catalyst, iOS 26 maps to macOS 26 (Tahoe). Intel Macs cap at
-        // macOS 15, so this is false there and we cleanly take Metal 3.
-        // The macOS clause covers native macOS apps using the SwiftPM package.
+        // Metal 4 needs Apple Silicon (the MTL4* types don't exist in the
+        // Intel SDK). On arm64 with iOS 26 / macOS 26+, try Metal 4 first.
+        #if arch(arm64)
         if #available(iOS 26, macOS 26, *), buildMetal4Pipelines(library: library) {
             usesMetal4 = true
             return
         }
+        #endif
         usesMetal4 = false
         buildMetal3Pipelines(library: library)
     }
@@ -413,15 +414,18 @@ public final class MTTerrainRenderer {
         }
     }
 
-    /// Metal 4 fast path (iOS 26+ / macOS 26+). Compiles the same shaders through
-    /// `MTL4Compiler` (dedicated compilation context, shared Metal IR)
-    /// instead of the device. Best-effort: any failure returns false and the
-    /// caller falls back to the Metal 3 path — this never crashes on older OS
-    /// because the whole method is gated by `@available(iOS 26, macOS 26, *)`.
+    /// Metal 4 fast path (iOS 26+ / macOS 26+, Apple Silicon only).
+    /// Compiles the same shaders through `MTL4Compiler` (dedicated
+    /// compilation context, shared Metal IR) instead of the device.
+    /// Best-effort: any failure returns false and the caller falls back
+    /// to the Metal 3 path.
     ///
+    /// Compiled only on arm64: Metal 4 requires Apple Silicon GPUs.
+    /// Intel Macs don't have the MTL4* types in their SDK, so the
+    /// `#if arch(arm64)` gate keeps this file compiling there.
     /// API names verified against Apple's metal-cpp headers (MTL4Compiler,
-    /// MTL4RenderPipelineDescriptor, MTL4LibraryFunctionDescriptor); re-check
-    /// against the iOS 26 SDK if behavior differs.
+    /// MTL4RenderPipelineDescriptor, MTL4LibraryFunctionDescriptor).
+    #if arch(arm64)
     @available(iOS 26, macOS 26, *)
     private func buildMetal4Pipelines(library: MTLLibrary) -> Bool {
         do {
@@ -478,6 +482,7 @@ public final class MTTerrainRenderer {
         // depthStencilState + the MTKView's depth attachment.
         return try compiler.makeRenderPipelineState(descriptor: d, compilerTaskOptions: nil)
     }
+    #endif
 
     private func buildDepthStates() {
         let d = MTLDepthStencilDescriptor()
