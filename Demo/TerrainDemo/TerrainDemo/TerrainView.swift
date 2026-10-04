@@ -117,6 +117,7 @@ struct TerrainView: UIViewRepresentable {
         // Walk mode: player position on the XZ plane. Y follows terrain.
         var playerPos = SIMD2<Float>(0, 0)
         var walkYaw: Float = 0
+        var walkPitch: Float = -0.1
 
         private var parent = TerrainView(
             seed: .constant(1337), rebuildToken: .constant(0),
@@ -324,7 +325,9 @@ struct TerrainView: UIViewRepresentable {
                 let groundY = world.worldY(forHeight: world.heightAt(x: Double(playerPos.x), z: Double(playerPos.y)))
                 let eyeY = groundY + max(2, parent.playerHeight)
                 camPosition = SIMD3<Float>(playerPos.x, eyeY, playerPos.y)
-                camTarget = camPosition + SIMD3<Float>(forward.x, -0.15, forward.y) * 10
+                let cp = cos(walkPitch)
+                let lookDir = SIMD3<Float>(sin(walkYaw) * cp, sin(walkPitch), cos(walkYaw) * cp)
+                camTarget = camPosition + lookDir * 10
                 // Keep the chunk streamer centered on the player.
                 target = SIMD3<Float>(playerPos.x, 0, playerPos.y)
             } else {
@@ -354,8 +357,14 @@ struct TerrainView: UIViewRepresentable {
             }
             #endif
             let t = g.translation(in: v)
-            yaw -= Float(t.x * 0.0055)
-            pitch = min(1.35, max(0.08, pitch - Float(t.y * 0.0055)))
+            if parent.cameraMode == .walk {
+                // Walk mode: drag to look around (yaw + pitch).
+                walkYaw -= Float(t.x * 0.005)
+                walkPitch = min(1.2, max(-1.2, walkPitch - Float(t.y * 0.005)))
+            } else {
+                yaw -= Float(t.x * 0.0055)
+                pitch = min(1.35, max(0.08, pitch - Float(t.y * 0.0055)))
+            }
             g.setTranslation(.zero, in: v)
         }
 
