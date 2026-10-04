@@ -47,7 +47,7 @@ public enum MTMeshBuilder {
 
     /// Biome colors blend toward the neighboring biome within this normalized
     /// height distance of a biome border.
-    private static let biomeBlendRange: Float = 0.01
+    private static let biomeBlendRange: Float = 0.035
 
     /// Slopes steeper than this (1 - normal.y) use the biome's slopeColor.
     private static let cliffSlopeThreshold: Float = 0.55
@@ -192,7 +192,58 @@ public enum MTMeshBuilder {
                 ))
             }
         }
-        return (vertices, gridIndices(n: n))
+        var (allVertices, allIndices) = (vertices, gridIndices(n: n))
+        // Solid terrain: add vertical skirts around the chunk edges so the
+        // world looks like a solid block, not a floating sheet. The skirt
+        // drops straight down from each edge vertex.
+        appendSkirt(vertices: &allVertices, indices: &allIndices, n: n,
+                    worldSize: worldSize, originX: originX, originZ: originZ,
+                    world: world)
+        return (allVertices, allIndices)
+    }
+
+    /// Appends a vertical skirt around the chunk border. Each edge vertex
+    /// gets a duplicate pushed down by `skirtDepth`; quads connect the edge
+    /// to its lowered twin. Wound to face outward.
+    private static func appendSkirt(
+        vertices: inout [MTVertex],
+        indices: inout [UInt32],
+        n: Int,
+        worldSize: Float,
+        originX: Float,
+        originZ: Float,
+        world: MTTerrainWorld
+    ) {
+        let skirtDepth = world.config.heightScale * 0.35 + 10
+        let base = UInt32(vertices.count)
+        // Collect edge vertices in order: bottom, right, top, left.
+        var edge: [UInt32] = []
+        edge.reserveCapacity(4 * n)
+        for a in 0..<n { edge.append(UInt32(a)) }                    // j = 0
+        for b in 1..<n { edge.append(UInt32(b * n + (n - 1))) }      // i = n-1
+        for a in stride(from: n - 2, through: 0, by: -1) { edge.append(UInt32((n - 1) * n + a)) } // j = n-1
+        for b in stride(from: n - 2, through: 1, by: -1) { edge.append(UInt32(b * n)) }          // i = 0
+
+        for (k, vi) in edge.enumerated() {
+            let v = vertices[Int(vi)]
+            let px = v.position.x, pz = v.position.z
+            // Outward normal: horizontal, pointing away from chunk center.
+            let cx = originX + worldSize / 2, cz = originZ + worldSize / 2
+            var nx = px - cx, nz = pz - cz
+            let len = max(0.001, sqrt(nx * nx + nz * nz))
+            nx /= len; nz /= len
+            vertices.append(MTVertex(
+                position: SIMD3<Float>(px, v.position.y - skirtDepth, pz),
+                normal: SIMD3<Float>(nx, 0, nz),
+                color: v.color * SIMD3<Float>(repeating: 0.55)
+            ))
+            let si = base + UInt32(k)
+            let sj = base + UInt32((k + 1) % edge.count)
+            let vj = edge[(k + 1) % edge.count]
+            // Outward-facing quad: (vi, vj, sj), (vi, sj, si)
+            indices.append(contentsOf: [vi, vj, sj, vi, sj, si])
+        }
+    }
     }
 
     /// Two triangles per quad, wound counter-clockwise seen from +Y so they

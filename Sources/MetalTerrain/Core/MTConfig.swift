@@ -5,7 +5,7 @@ import Foundation
 
 /// All tweakables for a terrain world. Matches DESIGN.md exactly.
 public struct MTTerrainConfig {
-    public var chunkResolution: Int   // vertices per chunk side, default 64
+    public var chunkResolution: Int   // vertices per chunk side, default 96
     public var chunkWorldSize: Float  // world units, default 128
     public var viewDistance: Int      // chunk radius around camera, default 6
     public var seaLevel: Float        // normalized 0...1, default 0.45
@@ -20,7 +20,7 @@ public struct MTTerrainConfig {
     public var fogDensity: Float
 
     public init(
-        chunkResolution: Int = 64,
+        chunkResolution: Int = 96,
         chunkWorldSize: Float = 128,
         viewDistance: Int = 6,
         seaLevel: Float = 0.45,
