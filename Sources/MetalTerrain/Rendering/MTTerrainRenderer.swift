@@ -106,6 +106,9 @@ public final class MTTerrainRenderer {
     public var wireframe: Bool = false
     public var showsWater: Bool = true
     public var fogEnabled: Bool = true
+    /// Sun position: azimuth (0-360°, direction) and elevation (0-90°, height).
+    public var sunAzimuth: Float = 45
+    public var sunElevation: Float = 50
     /// Render distance in chunks (radius). Changing this updates the world
     /// config, which triggers a cache invalidation and rebuild.
     public var viewDistance: Int {
@@ -610,12 +613,16 @@ public final class MTTerrainRenderer {
     private func writeUniforms(slot: Int, model: simd_float4x4, time: Float) {
         let cfg = world.config
         let density = fogEnabled ? cfg.fogDensity : 0
+        // Sun direction from azimuth/elevation (degrees).
+        let az = sunAzimuth * .pi / 180
+        let el = sunElevation * .pi / 180
+        let sunDir = SIMD3<Float>(cos(el) * sin(az), sin(el), cos(el) * cos(az))
         let u = MTUniforms(
             viewProj: viewProj,
             model: model,
             cameraPos: SIMD4<Float>(cameraPos, 1),
             fogColor: SIMD4<Float>(cfg.fogColor, density),
-            lightDir: SIMD4<Float>(normalize(SIMD3<Float>(0.45, 0.75, 0.35)), 0.38),
+            lightDir: SIMD4<Float>(normalize(sunDir), 0.38),
             misc: SIMD4<Float>(time, 0, 0, 0)
         )
         var copy = u

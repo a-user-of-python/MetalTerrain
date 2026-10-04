@@ -13,8 +13,10 @@ struct ContentView: View {
     @State private var fogEnabled = true
     @State private var viewDistance = 6
     @State private var cameraMode: CameraMode = .orbit
-    @State private var playerHeight: Float = 8
+    @State private var playerHeight: Float = 2
     @State private var moveInput = SIMD2<Float>(0, 0)
+    @State private var sunAzimuth: Float = 45
+    @State private var sunElevation: Float = 50
     @State private var fps: Double = 0
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
@@ -36,7 +38,9 @@ struct ContentView: View {
                     dragMode: $dragMode,
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
-                    moveInput: $moveInput
+                    moveInput: $moveInput,
+                    sunAzimuth: $sunAzimuth,
+                    sunElevation: $sunElevation
                 )
                 .ignoresSafeArea()
 
@@ -109,6 +113,8 @@ struct ContentView: View {
             viewDistance: $viewDistance,
             cameraMode: $cameraMode,
             playerHeight: $playerHeight,
+            sunAzimuth: $sunAzimuth,
+            sunElevation: $sunElevation,
             fps: fps,
             dragMode: $dragMode,
             onRegenerate: regenerate,

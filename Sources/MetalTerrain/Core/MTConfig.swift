@@ -21,10 +21,10 @@ public struct MTTerrainConfig {
 
     public init(
         chunkResolution: Int = 96,
-        chunkWorldSize: Float = 320,
+        chunkWorldSize: Float = 480,
         viewDistance: Int = 6,
         seaLevel: Float = 0.45,
-        heightScale: Float = 150,
+        heightScale: Float = 220,
         biomes: [MTBiome] = MTBiome.default,
         noise: MTNoiseConfig = MTNoiseConfig(),
         structureNoise: MTNoiseConfig = MTNoiseConfig(
@@ -35,7 +35,7 @@ public struct MTTerrainConfig {
         structureDensity: Float = 0.35,
         waterColor: SIMD3<Float> = SIMD3<Float>(0.10, 0.35, 0.62),
         fogColor: SIMD3<Float> = SIMD3<Float>(0.62, 0.74, 0.86),
-        fogDensity: Float = 0.0045
+        fogDensity: Float = 0.0028
     ) {
         self.chunkResolution = max(2, chunkResolution)
         // Clamp to safe ranges: negative/huge viewDistance crashes or

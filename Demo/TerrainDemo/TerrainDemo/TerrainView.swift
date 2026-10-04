@@ -77,6 +77,9 @@ struct TerrainView: UIViewRepresentable {
     @Binding var playerHeight: Float
     /// Joystick input: x = strafe, y = forward (-1...1 each).
     @Binding var moveInput: SIMD2<Float>
+    /// Sun angle (degrees).
+    @Binding var sunAzimuth: Float
+    @Binding var sunElevation: Float
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -126,7 +129,8 @@ struct TerrainView: UIViewRepresentable {
             fogEnabled: .constant(true), viewDistance: .constant(6),
             fps: .constant(0), dragMode: .constant(.orbit),
             cameraMode: .constant(.orbit), playerHeight: .constant(8),
-            moveInput: .constant(SIMD2<Float>(0, 0))
+            moveInput: .constant(SIMD2<Float>(0, 0)),
+            sunAzimuth: .constant(45), sunElevation: .constant(50)
         )
         private var device: MTLDevice?
         private var world: MTTerrainWorld?
@@ -204,6 +208,8 @@ struct TerrainView: UIViewRepresentable {
             renderer?.wireframe = parent.wireframe
             renderer?.showsWater = parent.showsWater
             renderer?.fogEnabled = parent.fogEnabled
+            renderer?.sunAzimuth = parent.sunAzimuth
+            renderer?.sunElevation = parent.sunElevation
             if lastViewDistance != parent.viewDistance {
                 lastViewDistance = parent.viewDistance
                 renderer?.viewDistance = parent.viewDistance

@@ -12,6 +12,8 @@ struct ControlPanel: View {
     @Binding var viewDistance: Int
     @Binding var cameraMode: CameraMode
     @Binding var playerHeight: Float
+    @Binding var sunAzimuth: Float
+    @Binding var sunElevation: Float
     var fps: Double
     @Binding var dragMode: DragMode
     var onRegenerate: () -> Void
@@ -73,13 +75,23 @@ struct ControlPanel: View {
             }
             .font(.headline)
 
-            // Environment: water, fog, structures, wireframe
+            // Environment: water, fog, structures, wireframe, sun
             DisclosureGroup("Environment") {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("Water", isOn: $showsWater)
                     Toggle("Fog", isOn: $fogEnabled)
                     Toggle("Structures", isOn: $structuresEnabled)
                     Toggle("Wireframe", isOn: $wireframe)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Sun direction: \(Int(sunAzimuth))°")
+                            .font(.headline)
+                        Slider(value: $sunAzimuth, in: 0...360, step: 1)
+                            .tint(.orange)
+                        Text("Sun height: \(Int(sunElevation))°")
+                            .font(.headline)
+                        Slider(value: $sunElevation, in: 5...90, step: 1)
+                            .tint(.orange)
+                    }
                 }
                 .font(.headline)
                 .padding(.top, 4)

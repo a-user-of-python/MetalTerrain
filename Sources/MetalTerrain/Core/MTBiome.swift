@@ -35,7 +35,7 @@ extension MTBiome {
                     groundColor: SIMD3<Float>(0.02, 0.12, 0.30)),
             MTBiome(name: "ocean", minHeight: 0.32, maxHeight: 0.45,
                     groundColor: SIMD3<Float>(0.05, 0.28, 0.55)),
-            MTBiome(name: "beach", minHeight: 0.44, maxHeight: 0.50,
+            MTBiome(name: "beach", minHeight: 0.42, maxHeight: 0.52,
                     groundColor: SIMD3<Float>(0.85, 0.75, 0.55)),
             MTBiome(name: "grass", minHeight: 0.49, maxHeight: 0.62,
                     groundColor: SIMD3<Float>(0.25, 0.55, 0.20)),
