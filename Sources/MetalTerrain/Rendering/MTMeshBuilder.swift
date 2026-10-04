@@ -235,7 +235,7 @@ public enum MTMeshBuilder {
             vertices.append(MTVertex(
                 position: SIMD3<Float>(px, v.position.y - skirtDepth, pz),
                 normal: SIMD3<Float>(nx, 0, nz),
-                color: v.color * SIMD3<Float>(repeating: 0.55)
+                color: SIMD3<Float>(v.color.x * 0.55, v.color.y * 0.55, v.color.z * 0.55)
             ))
             let si = base + UInt32(k)
             let sj = base + UInt32((k + 1) % edge.count)
