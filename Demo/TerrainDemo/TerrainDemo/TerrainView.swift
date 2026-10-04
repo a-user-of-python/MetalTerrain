@@ -282,7 +282,9 @@ struct TerrainView: UIViewRepresentable {
                 if now - lastFPSPush > 0.5 {
                     lastFPSPush = now
                     let value = fpsEMA
-                    DispatchQueue.main.async { self.parent.$fps.wrappedValue = value }
+                    DispatchQueue.main.async { [weak self] in
+                        self?.parent.$fps.wrappedValue = value
+                    }
                 }
             }
             lastFrameTime = now
