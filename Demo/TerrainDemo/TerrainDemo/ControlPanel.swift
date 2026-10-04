@@ -10,9 +10,12 @@ struct ControlPanel: View {
     @Binding var showsWater: Bool
     @Binding var fogEnabled: Bool
     @Binding var viewDistance: Int
+    @Binding var cameraMode: CameraMode
+    @Binding var playerHeight: Float
     var fps: Double
     @Binding var dragMode: DragMode
     var onRegenerate: () -> Void
+    var onCloneWorld: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -33,15 +36,27 @@ struct ControlPanel: View {
                 Spacer()
                 Button(action: onRegenerate) {
                     Text("Regenerate")
-                        .font(.title3)
+                        .font(.title2)
                         .bold()
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 14)
                 }
                 .background(Color.blue)
                 .foregroundColor(.white)
                 .cornerRadius(14)
             }
+
+            // Clone world: duplicate the current seed into the seed field
+            Button(action: onCloneWorld) {
+                Text("Clone World")
+                    .font(.title3)
+                    .bold()
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+            }
+            .background(Color.green)
+            .foregroundColor(.white)
+            .cornerRadius(14)
 
             // Biome preset picker
             VStack(alignment: .leading, spacing: 6) {
@@ -57,13 +72,40 @@ struct ControlPanel: View {
 
             // Toggles
             Toggle("Structures", isOn: $structuresEnabled)
-                .font(.title3)
+                .font(.title2)
+                .bold()
             Toggle("Wireframe", isOn: $wireframe)
-                .font(.title3)
+                .font(.title2)
+                .bold()
             Toggle("Water", isOn: $showsWater)
-                .font(.title3)
+                .font(.title2)
+                .bold()
             Toggle("Fog", isOn: $fogEnabled)
-                .font(.title3)
+                .font(.title2)
+                .bold()
+
+            // Camera mode
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Camera")
+                    .font(.title2)
+                    .bold()
+                Picker("Camera", selection: $cameraMode) {
+                    ForEach(CameraMode.allCases) { m in
+                        Text(m.rawValue).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            // Player size (walk mode eye height)
+            if cameraMode == .walk {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Player height: \(Int(playerHeight))")
+                        .font(.title3)
+                    Slider(value: $playerHeight, in: 2...60, step: 1)
+                        .tint(.blue)
+                }
+            }
 
             // Render distance (chunks radius)
             VStack(alignment: .leading, spacing: 6) {

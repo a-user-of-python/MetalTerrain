@@ -12,6 +12,9 @@ struct ContentView: View {
     @State private var showsWater = true
     @State private var fogEnabled = true
     @State private var viewDistance = 6
+    @State private var cameraMode: CameraMode = .orbit
+    @State private var playerHeight: Float = 8
+    @State private var moveInput = SIMD2<Float>(0, 0)
     @State private var fps: Double = 0
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
@@ -30,7 +33,10 @@ struct ContentView: View {
                     fogEnabled: $fogEnabled,
                     viewDistance: $viewDistance,
                     fps: $fps,
-                    dragMode: $dragMode
+                    dragMode: $dragMode,
+                    cameraMode: $cameraMode,
+                    playerHeight: $playerHeight,
+                    moveInput: $moveInput
                 )
                 .ignoresSafeArea()
 
@@ -73,6 +79,20 @@ struct ContentView: View {
                         .padding()
                     }
                 }
+
+                // Walk-mode joystick (bottom-left, only in walk mode)
+                if cameraMode == .walk {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            JoystickView(input: $moveInput)
+                                .frame(width: 140, height: 140)
+                                .padding(.leading, 24)
+                                .padding(.bottom, 24)
+                            Spacer()
+                        }
+                    }
+                }
             }
         }
     }
@@ -86,10 +106,19 @@ struct ContentView: View {
             showsWater: $showsWater,
             fogEnabled: $fogEnabled,
             viewDistance: $viewDistance,
+            cameraMode: $cameraMode,
+            playerHeight: $playerHeight,
             fps: fps,
             dragMode: $dragMode,
-            onRegenerate: regenerate
+            onRegenerate: regenerate,
+            onCloneWorld: cloneWorld
         )
+    }
+
+    /// Copies the current seed into the seed field so the user can tweak
+    /// and regenerate a variation, or re-enter it later to revisit.
+    private func cloneWorld() {
+        seedText = String(seed)
     }
 
     /// Applies the seed field (or a random seed when it is blank/invalid)

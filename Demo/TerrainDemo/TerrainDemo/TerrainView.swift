@@ -9,7 +9,18 @@ enum BiomePreset: String, CaseIterable, Identifiable {
     case `default` = "Default"
     case desert = "Desert"
     case alien = "Alien"
+    case forest = "Forest"
     case custom = "Custom"
+
+    var id: String { rawValue }
+}
+
+// MARK: - Camera mode
+
+/// Orbit = classic 3/4 aerial view. Walk = first-person on the terrain.
+enum CameraMode: String, CaseIterable, Identifiable {
+    case orbit = "Orbit"
+    case walk = "Walk"
 
     var id: String { rawValue }
 }
@@ -60,6 +71,12 @@ struct TerrainView: UIViewRepresentable {
     @Binding var fps: Double
     /// Mac Catalyst: what mouse-drag does (touch devices always orbit).
     @Binding var dragMode: DragMode
+    /// Orbit vs first-person walk.
+    @Binding var cameraMode: CameraMode
+    /// Eye height above terrain in walk mode (player size).
+    @Binding var playerHeight: Float
+    /// Joystick input: x = strafe, y = forward (-1...1 each).
+    @Binding var moveInput: SIMD2<Float>
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -97,13 +114,18 @@ struct TerrainView: UIViewRepresentable {
         var pitch: Float = 0.62
         var distance: Float = 340
         var target = SIMD3<Float>(0, 0, 0)
+        // Walk mode: player position on the XZ plane. Y follows terrain.
+        var playerPos = SIMD2<Float>(0, 0)
+        var walkYaw: Float = 0
 
         private var parent = TerrainView(
             seed: .constant(1337), rebuildToken: .constant(0),
             preset: .constant(.default), structuresEnabled: .constant(true),
             wireframe: .constant(false), showsWater: .constant(true),
             fogEnabled: .constant(true), viewDistance: .constant(6),
-            fps: .constant(0), dragMode: .constant(.orbit)
+            fps: .constant(0), dragMode: .constant(.orbit),
+            cameraMode: .constant(.orbit), playerHeight: .constant(8),
+            moveInput: .constant(SIMD2<Float>(0, 0))
         )
         private var device: MTLDevice?
         private var world: MTTerrainWorld?
@@ -215,6 +237,13 @@ struct TerrainView: UIViewRepresentable {
                 var config = MTTerrainConfig.default
                 config.biomes = Self.alienBiomes
                 world = MTTerrainWorld(seed: seed, config: config)
+            case .forest:
+                var config = MTTerrainConfig.default
+                config.biomes = Self.forestBiomes
+                // Dense woodland: boost structure density for a lived-in feel.
+                config.structureDensity = 0.65
+                config.structuresEnabled = true
+                world = MTTerrainWorld(seed: seed, config: config)
             case .custom:
                 world = MTTerrainWorld(seed: seed, config: .default)
                 // Custom biome: takes precedence over the built-ins in 0.80–1.0,
@@ -259,10 +288,31 @@ struct TerrainView: UIViewRepresentable {
             lastFrameTime = now
 
             let aspect = Float(view.drawableSize.width / max(1, view.drawableSize.height))
-            let cp = cos(pitch)
-            let position = target + SIMD3<Float>(sin(yaw) * cp, sin(pitch), cos(yaw) * cp) * distance
 
-            renderer.setCamera(position: position, target: target,
+            let camPosition: SIMD3<Float>
+            let camTarget: SIMD3<Float>
+            if parent.cameraMode == .walk, let world {
+                // Walk mode: first-person. Joystick moves the player on XZ;
+                // Y follows the terrain height + eye height (player size).
+                let input = parent.moveInput
+                let speed: Float = 60  // world units/sec at full tilt
+                let dt = lastFrameTime > 0 ? Float(now - lastFrameTime) : 0
+                let forward = SIMD2<Float>(sin(walkYaw), cos(walkYaw))
+                let right = SIMD2<Float>(forward.y, -forward.x)
+                playerPos += (forward * -input.y + right * input.x) * speed * min(dt, 0.1)
+                let groundY = world.worldY(forHeight: world.heightAt(x: Double(playerPos.x), z: Double(playerPos.y)))
+                let eyeY = groundY + max(2, parent.playerHeight)
+                camPosition = SIMD3<Float>(playerPos.x, eyeY, playerPos.y)
+                camTarget = camPosition + SIMD3<Float>(forward.x, -0.15, forward.y) * 10
+                // Keep the chunk streamer centered on the player.
+                target = SIMD3<Float>(playerPos.x, 0, playerPos.y)
+            } else {
+                let cp = cos(pitch)
+                camPosition = target + SIMD3<Float>(sin(yaw) * cp, sin(pitch), cos(yaw) * cp) * distance
+                camTarget = target
+            }
+
+            renderer.setCamera(position: camPosition, target: camTarget,
                                fovDegrees: 55, aspect: aspect,
                                near: 1, far: 4000)
             renderer.update(cameraTarget: SIMD2<Float>(target.x, target.z))
@@ -377,5 +427,23 @@ extension TerrainView.Coordinator {
         MTBiome(name: "starCap", minHeight: 0.88, maxHeight: 1.00,
                 groundColor: SIMD3<Float>(0.92, 0.96, 1.00),
                 emitsLight: true),
+    ]
+
+    /// Dense forest: lakes, mossy shores, deep woods, pine highlands.
+    /// Structures are boosted for a lived-in woodland feel.
+    static let forestBiomes: [MTBiome] = [
+        MTBiome(name: "lake", minHeight: 0.00, maxHeight: 0.40,
+                groundColor: SIMD3<Float>(0.05, 0.25, 0.45)),
+        MTBiome(name: "shore", minHeight: 0.40, maxHeight: 0.46,
+                groundColor: SIMD3<Float>(0.55, 0.50, 0.35)),
+        MTBiome(name: "meadow", minHeight: 0.46, maxHeight: 0.55,
+                groundColor: SIMD3<Float>(0.30, 0.58, 0.22)),
+        MTBiome(name: "deepWoods", minHeight: 0.55, maxHeight: 0.70,
+                groundColor: SIMD3<Float>(0.10, 0.35, 0.10)),
+        MTBiome(name: "pineHighland", minHeight: 0.70, maxHeight: 0.85,
+                groundColor: SIMD3<Float>(0.16, 0.30, 0.16),
+                slopeColor: SIMD3<Float>(0.35, 0.32, 0.28)),
+        MTBiome(name: "mistyPeak", minHeight: 0.85, maxHeight: 1.00,
+                groundColor: SIMD3<Float>(0.75, 0.78, 0.80)),
     ]
 }
