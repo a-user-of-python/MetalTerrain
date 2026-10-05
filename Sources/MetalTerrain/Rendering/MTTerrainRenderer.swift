@@ -222,13 +222,16 @@ public final class MTTerrainRenderer {
         }
 
         // Rebuild structure instances only when the visible chunk set changes.
+        // Track enabled state separately to force rebuild on toggle.
         if world.structuresEnabled {
-            if needed != structureChunkSet {
+            if needed != structureChunkSet || !structuresWereEnabled {
                 structureChunkSet = needed
+                structuresWereEnabled = true
                 rebuildStructureInstances(visible: needed)
             }
-        } else if !structureChunkSet.isEmpty {
+        } else if !structureChunkSet.isEmpty || structuresWereEnabled {
             structureChunkSet = []
+            structuresWereEnabled = false
             clearStructureInstances()
         }
     }
@@ -442,6 +445,7 @@ public final class MTTerrainRenderer {
     }
     private var structureMeshes: [MTStructureKind: StructureMesh] = [:]
     private var structureChunkSet = Set<MTChunkCoord>()
+    private var structuresWereEnabled = true
 
     private var viewConfigured = false
 

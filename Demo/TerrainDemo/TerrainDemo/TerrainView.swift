@@ -265,8 +265,28 @@ struct TerrainView: UIViewRepresentable {
             renderer.wireframe = parent.wireframe
             renderer.showsWater = parent.showsWater
             self.renderer = renderer
+            // Find safe spawn: search outward for land above sea level.
+            playerPos = findSafeSpawn(in: world)
             parent.onRendererReady?(renderer)
             // ─────────────────────────────────────────────────────────
+        }
+
+        /// Searches a spiral for land above sea level (not water, not steep).
+        private func findSafeSpawn(in world: MTTerrainWorld) -> SIMD2<Float> {
+            let seaLevel = world.config.seaLevel
+            // Try (0,0) first, then spiral outward.
+            for radius: Double in [0, 100, 200, 400, 800, 1600] {
+                for angle in stride(from: 0.0, to: 6.28, by: 0.5) {
+                    let x = radius * cos(angle)
+                    let z = radius * sin(angle)
+                    let h = world.heightAt(x: x, z: z)
+                    // Land, above beach, below mountain (flat-ish).
+                    if h > seaLevel + 0.05 && h < 0.70 {
+                        return SIMD2<Float>(Float(x), Float(z))
+                    }
+                }
+            }
+            return SIMD2<Float>(0, 0)  // fallback
         }
 
         // MARK: - MTKViewDelegate
