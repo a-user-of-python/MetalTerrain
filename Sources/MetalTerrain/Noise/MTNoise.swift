@@ -207,7 +207,10 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     // Wide smooth valley (not a thin line that breaks).
     let riverCarve = max(0, 1 - riverDist * 6)
     let riverCarveSmooth = riverCarve * riverCarve * (3 - 2 * riverCarve)
-    let landMask = max(0, min(1, (continent + 0.15) * 3))
+    // Let rivers reach the ocean: don't fade at the coast. Instead, scale
+    // carve depth by height above sea level so river mouths are shallow
+    // channels, not canyons through the beach. Only carve on land.
+    let landMask = max(0, min(1, (continent + 0.45) * 2.5))
     let riverCarveMasked = riverCarveSmooth * landMask
 
     // ── Combine: continent sets the stage, detail adds texture ──
@@ -215,7 +218,9 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     let plainsFlatten = 1 - mountainMask * 0.7
     var h = 0.5 + continent * 0.55 + detail * 0.28 * plainsFlatten
     h += mountains * 0.38
-    h -= riverCarveMasked * 0.28  // carve rivers (only on land)
+    // River depth scales with elevation: deep in mountains, shallow at coast.
+    let elevationFactor = max(0.15, min(1, (h - 0.45) * 3))
+    h -= riverCarveMasked * 0.28 * elevationFactor
 
     return Float(min(max(h, 0.0), 1.0))
 }
