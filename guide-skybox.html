@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skybox — MetalTerrain Docs</title>
+<meta name="description" content="MTSkybox: gradient sky dome with a visible sun disc that follows your sun angles.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Skybox</h1>
+<p class="lead"><code>MTSkybox</code> is the library's sky renderer: a gradient sky dome with a
+<strong>visible sun disc</strong>. Works on <strong>all</strong> devices — not gated behind
+<code>M3_FEATURES</code>.</p>
+<p>The skybox draws first each frame, behind everything, and its sun position matches the terrain's
+lighting direction (and the ray-traced shadow direction on M3-family GPUs).</p>
+
+<h2>Basic usage</h2>
+<pre><code class="language-swift">public final class MTSkybox {
+    public init(device: MTLDevice)
+    public var sunAzimuth: Float      // radians, default points east-ish
+    public var sunElevation: Float    // radians above the horizon
+    public func draw(encoder: MTLRenderCommandEncoder,
+                     viewProjection: matrix_float4x4)
+}</code></pre>
+<p>With <code>MTTerrainRenderer</code> or <code>MTTerrainView</code> you don't even write the draw call:</p>
+<pre><code class="language-swift">renderer.skybox?.sunAzimuth = 0.8
+renderer.skybox?.sunElevation = 0.5
+// drawn automatically at the start of renderer.draw(in:)</code></pre>
+<p><code>renderer.skybox</code> is created by default; set it to <code>nil</code> to disable sky rendering.</p>
+
+<h2>Sun semantics</h2>
+<table>
+<thead><tr><th>Property</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>sunAzimuth</code></td><td>Horizontal angle, radians. <code>0</code> = +X; increasing rotates toward +Z (right-handed about +Y). Full circle = 2π.</td></tr>
+<tr><td><code>sunElevation</code></td><td>Vertical angle above horizon, radians. <code>0</code> = horizon, <code>π/2</code> = overhead. Negative = below horizon (sky darkens).</td></tr>
+</tbody>
+</table>
+<div class="callout good"><p><strong>Both are live:</strong> changing them takes effect on the next <code>draw</code>.
+The same angles drive terrain lighting, so the sky's sun disc and the light on the mountains always agree —
+<strong>move the sun and both move together</strong>. On M3-family builds, ray-traced shadows are traced toward
+this same position.</p></div>
+<p>The same properties are mirrored on <code>MTTerrainView</code> (<code>sunAzimuth</code>, <code>sunElevation</code>) as a convenience.</p>
+
+<h2>Driving the sun from UI</h2>
+<pre><code class="language-swift">// Example: sliders in degrees → radians for the skybox
+let azimuthDeg: Float = 135    // compass-ish direction
+let elevationDeg: Float = 25   // height above horizon
+
+renderer.skybox?.sunAzimuth = azimuthDeg * .pi / 180
+renderer.skybox?.sunElevation = elevationDeg * .pi / 180
+// Terrain lighting follows automatically — same sun.</code></pre>
+
+<h2>See also</h2>
+<ul>
+<li><a href="api.html#mtskybox">MTSkybox</a> in the API reference.</li>
+<li><a href="guide-raytracing.html">Ray Tracing</a> — shadows traced toward this sun.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

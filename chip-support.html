@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chip Support — MetalTerrain Docs</title>
+<meta name="description" content="Which Apple chips support hardware ray tracing and mesh shading in MetalTerrain.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Chip Support</h1>
+<p class="lead">Which Apple chips support the M3-family GPU features:
+<strong>hardware ray tracing</strong> and <strong>mesh shading</strong>.</p>
+<div class="callout"><p>The library never guesses from the device name — it queries
+<code>device.supportsRayTracing</code> and <code>device.supportsFamily(.apple9)</code> at runtime
+via <code>MTCapabilities</code>. This table is the human-readable version of those checks.</p></div>
+
+<h2><span class="badge yes">YES</span> Hardware ray tracing + mesh shading</h2>
+<table>
+<thead><tr><th>Family</th><th>Chips</th><th>Found in</th></tr></thead>
+<tbody>
+<tr><td><strong>M3</strong></td><td>M3, M3 Pro, M3 Max, M3 Ultra</td><td>MacBook Air/Pro, iMac, Mac mini</td></tr>
+<tr><td><strong>M4</strong></td><td>M4, M4 Pro, M4 Max</td><td>MacBook Pro, iMac, Mac mini, Mac Studio, iPad Pro</td></tr>
+<tr><td><strong>M5</strong></td><td>M5 (and later)</td><td>Newer Macs and iPads</td></tr>
+<tr><td><strong>A17 Pro</strong></td><td>A17 Pro</td><td>iPhone 15 Pro / Pro Max, iPad mini (7th gen)</td></tr>
+<tr><td><strong>A18</strong></td><td>A18, A18 Pro</td><td>iPhone 16 / 16 Plus / 16 Pro / Pro Max</td></tr>
+<tr><td><strong>A19</strong></td><td>A19, A19 Pro (and later)</td><td>Newer iPhones</td></tr>
+</tbody>
+</table>
+
+<h2><span class="badge no">NO</span> Standard rendering only</h2>
+<table>
+<thead><tr><th>Family</th><th>Chips</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>M1</strong></td><td>M1, M1 Pro, M1 Max, M1 Ultra</td><td>Runs the full standard path at 60 fps — just no RT/mesh features.</td></tr>
+<tr><td><strong>M2</strong></td><td>M2, M2 Pro, M2 Max, M2 Ultra</td><td>Same — excellent standard rendering, no HW ray tracing.</td></tr>
+<tr><td><strong>A16 and earlier</strong></td><td>A16, A15, A14, …</td><td>iPhone 14 and older.</td></tr>
+</tbody>
+</table>
+
+<h2>What "no" means in practice</h2>
+<p>On unsupported chips, everything still works: the same API, the same worlds, the same 60 fps target.
+The differences are:</p>
+<ul>
+<li><strong>Shadows:</strong> analytic shadow term instead of ray-traced — same sun, same direction, softer contact. Intentionally subtle.</li>
+<li><strong>Mesh generation:</strong> CPU <code>MTMeshBuilder</code> instead of GPU mesh shaders — identical visuals.</li>
+<li><strong>Skybox:</strong> works everywhere, including M1/M2.</li>
+</ul>
+<p>An <code>M3_FEATURES</code> build still <strong>runs</strong> on M1/M2/A16 — the runtime checks fall back to the
+standard paths automatically. It just won't engage the hardware features.</p>
+
+<h2>Checking at runtime</h2>
+<pre><code class="language-swift">import MetalTerrain
+
+let rt = MTCapabilities.supportsHardwareRayTracing(device: device)
+let mesh = MTCapabilities.supportsMeshShading(device: device)
+
+if rt &amp;&amp; mesh {
+    // M3-family GPU: enable your M3-only UI, quality options, etc.
+}</code></pre>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

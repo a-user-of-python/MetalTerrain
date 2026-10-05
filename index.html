@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MetalTerrain — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain: a 3D terrain generation library for iOS. Swift + Metal, seeded infinite worlds.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<div class="hero">
+<h1>Metal<span style="color:var(--accent)">Terrain</span></h1>
+<p class="subtitle">A 3D terrain generation <strong>library</strong> for iOS — Swift + native Metal.
+Seeded infinite worlds with mountains, oceans, forests, and villages, rendered at 60&nbsp;fps.</p>
+</div>
+
+<div class="callout"><p><strong>Design principle:</strong> the library owns everything Metal —
+LOD, shaders, pipelines, chunk streaming, instancing. Your app only handles what it must:
+the view hierarchy, camera, input, and UI.</p></div>
+
+<h2>The 30-second pitch</h2>
+<p class="lead">Add one Swift package, write five lines, and your app has an endless explorable
+3D world: mountains, beaches, oceans, forests, snowy peaks, plus scattered low-poly structures —
+all deterministic from a single seed. Change the seed and get a brand-new planet.
+No assets, no textures, no physics engine, no third-party code.</p>
+
+<h2>Quickstart — 5 lines</h2>
+<pre><code class="language-swift">import MetalTerrain
+
+let terrainView = MTTerrainView(frame: view.bounds)
+terrainView.world = MTTerrainWorld(seed: 1337)
+view.addSubview(terrainView)
+
+terrainView.onFrame = { tv, dt in
+    // Your camera logic here — the library handles the rest.
+    tv.setCamera(position: eye, target: lookAt, aspect: aspect)
+}</code></pre>
+<p>For full control (custom <code>MTKView</code>, manual render loop), use
+<code>MTTerrainRenderer</code> directly. See <a href="getting-started.html">Getting Started</a>.</p>
+
+<h2>Features</h2>
+<div class="features">
+<div class="feature"><h3>🌍 Seeded infinite terrain</h3><p>Deterministic heightmap — the same seed always builds the same world, on any device.</p></div>
+<div class="feature"><h3>🧩 Chunked streaming</h3><p>The world pages in around the camera; unused chunks are pooled and reused.</p></div>
+<div class="feature"><h3>🎨 Data-driven biomes</h3><p>7 built-ins keyed on height; add or override your own at runtime.</p></div>
+<div class="feature"><h3>🔊 Exposed noise config</h3><p>Seed, octaves, frequency, lacunarity, gain, domain warp, ridged mountain mode.</p></div>
+<div class="feature"><h3>🏘️ Seeded structures</h3><p>Houses, towers, trees, boulders, wells, windmills, dungeons — one instanced draw call per kind.</p></div>
+<div class="feature"><h3>⚡ Metal renderer</h3><p>Metal 4 fast paths where available, Metal 3 fallback. LOD handled internally.</p></div>
+<div class="feature"><h3>☀️ Skybox + sun</h3><p>Gradient sky with a visible sun disc that follows your sun angle.</p></div>
+<div class="feature"><h3>✨ M3+ extras</h3><p>Hardware ray-traced shadows and mesh shading on M3/M4/M5 and A17&nbsp;Pro+.</p></div>
+<div class="feature"><h3>📦 Zero assets</h3><p>Vertex colors only — no textures, no downloads.</p></div>
+</div>
+
+<h2>Requirements</h2>
+<table>
+<thead><tr><th>Requirement</th><th>Minimum</th></tr></thead>
+<tbody>
+<tr><td>iOS</td><td>17.0+</td></tr>
+<tr><td>Chip</td><td>Apple Silicon (A11+ / M-series)</td></tr>
+<tr><td>Xcode</td><td>16.0+ (26+ for Metal 4 fast paths)</td></tr>
+<tr><td>Language</td><td>Swift 5.9+</td></tr>
+</tbody>
+</table>
+
+<h2>Where next</h2>
+<ul>
+<li><a href="getting-started.html"><strong>Getting Started</strong></a> — install the package, render your first terrain in 5 minutes.</li>
+<li><a href="api.html"><strong>API Reference</strong></a> — every public type, signature, and behavior.</li>
+<li><a href="chip-support.html"><strong>Chip Support</strong></a> — which chips get hardware ray tracing and mesh shading.</li>
+<li><a href="examples.html"><strong>Examples</strong></a> — copy-paste snippets for common tasks.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

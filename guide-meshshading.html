@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh Shading — MetalTerrain Docs</title>
+<meta name="description" content="Mesh shading in MetalTerrain: object/mesh shader pipeline for terrain on M3-family GPUs.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Mesh Shading <span class="badge m3">M3+ only</span></h1>
+<p class="lead">On M3-family GPUs, MetalTerrain can replace the standard vertex pipeline with
+<strong>mesh shaders</strong>: instead of the CPU expanding every chunk vertex, the GPU generates
+vertices itself from the chunk's heightmap.</p>
+
+<h2>What changes</h2>
+<table>
+<thead><tr><th></th><th>Standard path</th><th>Mesh-shader path</th></tr></thead>
+<tbody>
+<tr><td><strong>Vertex expansion</strong></td><td>CPU <code>MTMeshBuilder</code> builds a full indexed vertex buffer per chunk</td><td>GPU mesh shader expands the heightmap on-chip</td></tr>
+<tr><td><strong>LOD / culling</strong></td><td>CPU decides per chunk</td><td><strong>Object shader</strong> decides per chunk per frame, culls off-screen chunks to zero workgroups</td></tr>
+<tr><td><strong>Upload</strong></td><td>Full vertex buffer per chunk</td><td>Compact heightmap only</td></tr>
+</tbody>
+</table>
+
+<h2>Supported hardware</h2>
+<p>Same list as ray tracing: <strong>M3/M4/M5</strong> (all variants), <strong>A17&nbsp;Pro / A18 / A18&nbsp;Pro / A19 / A19&nbsp;Pro</strong>+.
+<strong>Not:</strong> M1/M2 (all variants), A16 and earlier.
+Runtime check: <code>device.supportsFamily(.apple9)</code> via
+<code>MTCapabilities.supportsMeshShading(device:)</code>. Full matrix: <a href="chip-support.html">Chip Support</a>.</p>
+
+<h2>Enabling it</h2>
+<p>Same two gates as ray tracing:</p>
+<ol>
+<li><strong>Build gate:</strong> compile with the <code>M3_FEATURES</code> Swift compilation condition
+(plus <code>-DM3_FEATURES</code> for the Metal compiler).</li>
+<li><strong>Runtime gate:</strong> <code>MTCapabilities.supportsMeshShading(device:)</code> must return true.</li>
+</ol>
+<p>A renderer built with <code>M3_FEATURES</code> switches to the mesh-shader path automatically on supported GPUs
+and falls back to CPU mesh generation otherwise. <strong>No separate API</strong> — chunk streaming,
+<code>update</code>, and <code>draw</code> behave the same from the outside.</p>
+
+<h2>What the shaders decide</h2>
+<h3>Object shader — per chunk, per frame</h3>
+<p>Receives the chunk's bounds and heightmap reference; outputs workgroup count and LOD:</p>
+<ul>
+<li><strong>LOD selection:</strong> distance from camera picks grid density, mirroring the standard path's LOD table.</li>
+<li><strong>Culling:</strong> chunks fully outside the frustum (or below the terrain horizon) emit zero workgroups.</li>
+</ul>
+<h3>Mesh shader — per workgroup</h3>
+<p>Reads height samples from the chunk heightmap, computes world-space positions, normals, and biome colors
+<strong>exactly as <code>MTMeshBuilder</code> does on the CPU</strong>, and emits the triangle grid.</p>
+
+<h2>Visual parity</h2>
+<div class="callout good"><p>The mesh-shader path is a <strong>performance optimization, not a visual upgrade</strong>.
+Same heights, same normals, same biome colors, same LOD table, same lighting. If you ever see a difference
+between the two paths at the same seed and camera, that's a bug.</p></div>
+
+<h2>When it matters</h2>
+<p>The mesh path pays off most at high <code>chunkResolution</code> and high <code>viewDistance</code> —
+where CPU vertex expansion and buffer uploads dominate. See <a href="guide-performance.html">Performance</a>.</p>
+
+<h2>See also</h2>
+<ul>
+<li><a href="guide-raytracing.html">Ray Tracing</a> — mesh-shaded chunks still provide BLAS geometry for shadows.</li>
+<li><a href="api.html#mtcapabilities">MTCapabilities</a></li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

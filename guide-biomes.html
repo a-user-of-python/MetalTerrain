@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Biome Authoring — MetalTerrain Docs</title>
+<meta name="description" content="How MetalTerrain biomes map heights to terrain looks, plus custom biome recipes.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Biome Authoring</h1>
+<p class="lead">Biomes turn raw heights into a world that <em>reads</em> — ocean vs. beach vs. forest vs. snow.
+This guide covers the mapping, the built-in table, and custom biome recipes.</p>
+
+<h2>How biomes map from height</h2>
+<p>Every point has a <strong>normalized height</strong> 0…1 (<code>world.heightAt(x:z:)</code>).
+A biome claims a slice of that range:</p>
+<pre><code class="language-swift">MTBiome(
+    name: &quot;grass&quot;,
+    minHeight: 0.50,   // inclusive — heights &gt;= 0.50 can match
+    maxHeight: 0.65,   // exclusive — heights &lt; 0.65 can match
+    groundColor: SIMD3(0.25, 0.55, 0.20),  // linear RGB 0...1
+    slopeColor: SIMD3(0.45, 0.38, 0.30),   // cliffs (optional)
+    emitsLight: false
+)</code></pre>
+<div class="callout"><p><strong>Key rules:</strong> <code>minHeight</code> is <strong>inclusive</strong>,
+<code>maxHeight</code> is <strong>exclusive</strong>. Stack ranges end-to-start for gapless coverage.
+Colors are <strong>linear RGB</strong> 0…1 (not sRGB 0–255). Biome colors bake into vertex colors at
+mesh build — don't animate them every frame.</p></div>
+
+<h2>The built-in table</h2>
+<p><code>MTBiome.default</code> ships seven biomes tiling the full 0…1 range:</p>
+<table>
+<thead><tr><th>Biome</th><th>Height range</th><th>Look</th></tr></thead>
+<tbody>
+<tr><td><code>deepOcean</code></td><td>bottom of range → low</td><td>dark blue water floor</td></tr>
+<tr><td><code>ocean</code></td><td>low → below sea level</td><td>mid blue water floor</td></tr>
+<tr><td><code>beach</code></td><td>around <code>seaLevel</code> ≈ 0.45</td><td>sand</td></tr>
+<tr><td><code>grass</code></td><td>lowlands above the beach</td><td>green plains</td></tr>
+<tr><td><code>forest</code></td><td>rolling highlands</td><td>darker, denser green</td></tr>
+<tr><td><code>mountain</code></td><td>high altitude</td><td>grey rock (with <code>slopeColor</code> cliffs)</td></tr>
+<tr><td><code>snowyPeak</code></td><td>top of range</td><td>white</td></tr>
+</tbody>
+</table>
+<p>The <code>beach</code> band straddles <code>config.seaLevel</code> — raising sea level widens the ocean
+and narrows the land.</p>
+
+<h2>Custom biomes: the three operations</h2>
+<pre><code class="language-swift">// Add a NEW biome (or REPLACE the one with the same name)
+world.setBiome(MTBiome(name: &quot;volcano&quot;, minHeight: 0.90, maxHeight: 1.0,
+                       groundColor: SIMD3(0.15, 0.05, 0.05),
+                       slopeColor: SIMD3(0.35, 0.10, 0.05),
+                       emitsLight: true))
+
+// Remove a custom biome you added (built-ins can&#x27;t be removed individually)
+world.removeBiome(named: &quot;volcano&quot;)
+
+// Throw away ALL custom biomes, restore the built-in table
+world.resetBiomesToDefault()</code></pre>
+
+<h3>Precedence rules</h3>
+<ol>
+<li><strong>Custom biomes are checked first, in insertion order.</strong> The first custom biome whose range contains the height wins.</li>
+<li><strong>Built-ins are the fallback.</strong></li>
+<li><strong><code>setBiome</code> with an existing name replaces in place</strong> — no duplicates.</li>
+</ol>
+<p>A custom biome overlapping a built-in range <em>shadows</em> the built-in there — that's how you override <code>snowyPeak</code>.</p>
+
+<h2>Recipe 1: Higher mountains</h2>
+<pre><code class="language-swift">// Snow starts lower and covers more of the highlands
+world.setBiome(MTBiome(name: &quot;snowyPeak&quot;,
+                       minHeight: 0.80, maxHeight: 1.0,
+                       groundColor: SIMD3(0.92, 0.94, 0.97),
+                       slopeColor: SIMD3(0.55, 0.50, 0.58)))
+
+// Stretch mountain down to meet it — no gap, no overlap
+world.setBiome(MTBiome(name: &quot;mountain&quot;,
+                       minHeight: 0.68, maxHeight: 0.80,
+                       groundColor: SIMD3(0.42, 0.40, 0.44),
+                       slopeColor: SIMD3(0.30, 0.28, 0.32)))</code></pre>
+<p>Pair with <code>noise.ridged = true</code> and higher <code>heightScale</code> for jagged alpine terrain.</p>
+
+<h2>Recipe 2: Lava biome (with <code>emitsLight</code>)</h2>
+<pre><code class="language-swift">world.setBiome(MTBiome(name: &quot;snowyPeak&quot;,
+                       minHeight: 0.88, maxHeight: 1.0,
+                       groundColor: SIMD3(0.92, 0.94, 0.97),
+                       slopeColor: SIMD3(0.55, 0.50, 0.58)))
+
+// Lava fields between mountain and snow
+world.setBiome(MTBiome(name: &quot;lava&quot;,
+                       minHeight: 0.80, maxHeight: 0.88,
+                       groundColor: SIMD3(0.85, 0.18, 0.05),  // molten orange-red
+                       slopeColor: SIMD3(0.25, 0.05, 0.03),   // cooled crust on cliffs
+                       emitsLight: true))                     // glows in the shader</code></pre>
+<p>The fragment shader treats <code>emitsLight</code> vertices as self-illuminated — they skip NdotL
+darkening, so lava reads as glowing even at night. <strong>Tip:</strong> keep glowing bands narrow.</p>
+
+<h2>Recipe 3: Underwater biomes</h2>
+<pre><code class="language-swift">// Tropical shallows: bright turquoise sand under the water
+world.setBiome(MTBiome(name: &quot;ocean&quot;,
+                       minHeight: 0.15, maxHeight: 0.42,
+                       groundColor: SIMD3(0.15, 0.65, 0.60)))
+
+// Abyssal plain: near-black
+world.setBiome(MTBiome(name: &quot;deepOcean&quot;,
+                       minHeight: 0.00, maxHeight: 0.15,
+                       groundColor: SIMD3(0.01, 0.03, 0.06)))</code></pre>
+<p>The water plane (<code>config.waterColor</code>) is drawn translucent <em>over</em> these ground colors —
+the final look is the blend of the two.</p>
+
+<h2>Tips</h2>
+<ul>
+<li><strong>Cover 0…1.</strong> Unmatched heights fall back to the built-in list.</li>
+<li><strong>Mind the sea.</strong> Keep water-adjacent bands near <code>config.seaLevel</code>.</li>
+<li><strong>Slope colors sell cliffs.</strong> Rock on mountains, dark loam in forests, pale sand on dunes.</li>
+<li><strong>Structures avoid some biomes</strong> — placement keeps to land between beach top and snow.</li>
+<li><strong>Name discipline:</strong> <code>"SnowyPeak"</code> ≠ <code>"snowyPeak"</code>. Reuse exact built-in names when overriding.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

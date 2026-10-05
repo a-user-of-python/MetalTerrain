@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Reference — MetalTerrain Docs</title>
+<meta name="description" content="Complete API reference for the MetalTerrain Swift library: every public type and method.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>API Reference</h1>
+<p class="lead">Every public type in <code>MetalTerrain</code>. Conventions:</p>
+<ul>
+<li><strong>Deterministic</strong> — same inputs (seed + config) → same output, on every run and every device. All world generation is deterministic.</li>
+<li>Heights are <strong>normalized 0…1</strong> unless a function name says otherwise. <code>worldY(forHeight:)</code> converts to world-space Y.</li>
+</ul>
+
+<div class="api-item" id="mtterrainview">
+<h2>MTTerrainView</h2>
+<div class="sig"><span class="type-name">public final class MTTerrainView: MTKView</span></div>
+<p>The zero-boilerplate integration. Drop it in a view hierarchy, assign a <code>world</code>,
+and drive the camera from <code>onFrame</code>. Device creation, pixel formats, the render loop,
+FPS tracking, and chunk streaming are all internal.</p>
+<pre><code class="language-swift">public var world: MTTerrainWorld?
+public private(set) var renderer: MTTerrainRenderer?
+public private(set) var fps: Double
+public var onFrame: ((MTTerrainView, TimeInterval) -&gt; Void)?
+
+public func setCamera(position: SIMD3&lt;Float&gt;, target: SIMD3&lt;Float&gt;,
+                      fovDegrees: Float = 55, aspect: Float,
+                      near: Float = 1, far: Float = 4000)
+
+public var wireframe: Bool
+public var showsWater: Bool
+public var fogEnabled: Bool
+public var shaderEffectsEnabled: Bool
+public var sunAzimuth: Float
+public var sunElevation: Float
+public var viewDistance: Int
+public var usesMetal4: Bool  // read-only</code></pre>
+<ul>
+<li><strong><code>world</code></strong> — assigning a world creates the renderer (carrying over display settings). Assign <code>nil</code> to tear down.</li>
+<li><strong><code>onFrame</code></strong> — called every frame on the main thread after FPS tracking, before draw. Update your camera here via <code>setCamera</code>.</li>
+<li><strong><code>usesMetal4</code></strong> — true when the Metal 4 pipeline compiled and is active.</li>
+</ul>
+</div>
+
+<div class="api-item" id="mtterrainrenderer">
+<h2>MTTerrainRenderer</h2>
+<div class="sig"><span class="type-name">public final class MTTerrainRenderer</span></div>
+<p>The Metal 3 renderer (with Metal 4 fast paths where available). Reference type — create once per <code>MTLDevice</code>.
+For custom <code>MTKView</code> setups; otherwise prefer <code>MTTerrainView</code>.</p>
+<pre><code class="language-swift">public init(device: MTLDevice, world: MTTerrainWorld)
+public var world: MTTerrainWorld
+
+public func setCamera(position: SIMD3&lt;Float&gt;, target: SIMD3&lt;Float&gt;,
+                      fovDegrees: Float, aspect: Float,
+                      near: Float, far: Float)
+
+/// Call every frame. Handles chunk streaming around the camera target.
+public func update(cameraTarget: SIMD2&lt;Float&gt;)
+public func draw(in view: MTKView)
+
+public var wireframe: Bool
+public var showsWater: Bool
+public var skybox: MTSkybox?
+public var rayTracing: MTRayTracing?  // nil unless built with M3_FEATURES</code></pre>
+<ul>
+<li><strong><code>init(device:world:)</code></strong> — compiles the shader library, creates pipeline state, sets up chunk and structure buffers.</li>
+<li><strong><code>world</code></strong> — swap the world to render a different planet (meshes rebuild on next <code>update</code>).</li>
+<li><strong><code>setCamera(...)</code></strong> — re-call on resize to update <code>aspect</code>. <code>far</code> must exceed <code>viewDistance × chunkWorldSize</code>.</li>
+<li><strong><code>update(cameraTarget:)</code></strong> — streams chunks around the camera target: generates missing chunks, builds GPU buffers, recycles out-of-range ones. Bounded per-frame work — fast camera moves cause gradual pop-in, not hitches.</li>
+<li><strong><code>draw(in:)</code></strong> — encodes one frame: skybox, terrain chunks (front-to-back), water plane, then one instanced draw per structure kind.</li>
+<li><strong><code>wireframe</code></strong> — triangle edges instead of filled faces (debugging).</li>
+<li><strong><code>showsWater</code></strong> — translucent water plane at sea level (default true).</li>
+<li><strong><code>skybox</code></strong> — created by default, drawn first each frame. Set to <code>nil</code> to disable. See <a href="guide-skybox.html">Skybox</a>.</li>
+<li><strong><code>rayTracing</code></strong> — non-nil only when built with <code>M3_FEATURES</code> <em>and</em> the device supports it. Driven automatically. See <a href="guide-raytracing.html">Ray Tracing</a>.</li>
+</ul>
+<div class="callout"><p><strong>Threading:</strong> <code>update</code> and <code>draw</code> are not thread-safe with each other —
+call both from the same thread (normally main via <code>MTKViewDelegate</code>).
+<code>MTTerrainWorld</code> query methods are safe from background threads.</p></div>
+</div>
+
+<div class="api-item" id="mtterrainworld">
+<h2>MTTerrainWorld</h2>
+<div class="sig"><span class="type-name">public final class MTTerrainWorld</span></div>
+<p>The main entry point. Reference type — share one instance between game logic and the renderer.</p>
+<pre><code class="language-swift">public init(seed: UInt64, config: MTTerrainConfig = .default)
+
+public var config: MTTerrainConfig
+public var seed: UInt64
+
+/// Normalized height 0...1 at world (x, z). Pure function of seed.
+public func heightAt(x: Double, z: Double) -&gt; Float
+
+/// Land above sea level, below the mountains. (0,0) if none found.
+public func findSafeSpawn() -&gt; SIMD2&lt;Float&gt;
+
+/// Biome for a normalized height (customs first, then built-ins).
+public func biomeAt(height: Float) -&gt; MTBiome
+
+/// Generate a chunk&#x27;s heightmap. Deterministic.
+public func generateChunk(at coord: MTChunkCoord) -&gt; MTChunk
+
+/// Structures toggle (live).
+public var structuresEnabled: Bool
+
+/// Structure placements intersecting a chunk. Deterministic.
+public func structures(in coord: MTChunkCoord) -&gt; [MTStructurePlacement]
+
+public func setBiome(_ biome: MTBiome)
+public func removeBiome(named name: String)
+public func resetBiomesToDefault()
+
+/// World-space Y of a normalized height.
+public func worldY(forHeight h: Float) -&gt; Float</code></pre>
+<ul>
+<li><strong><code>init(seed:config:)</code></strong> — <code>seed</code> is the world's identity. Same seed + same config = same planet, on any device.</li>
+<li><strong><code>heightAt(x:z:)</code></strong> — the core query. <strong>Pure function of the seed</strong>: gameplay code and rendered meshes can never disagree.</li>
+<li><strong><code>findSafeSpawn()</code></strong> — spiral-searches for land above sea level and below mountains. Ideal player spawn.</li>
+<li><strong><code>biomeAt(height:)</code></strong> — custom biomes checked first (insertion order), then built-ins.</li>
+<li><strong><code>structures(in:)</code></strong> — deterministic placements per chunk.</li>
+<li><strong><code>setBiome / removeBiome / resetBiomesToDefault</code></strong> — runtime biome editing. <code>setBiome</code> with an existing name replaces in place.</li>
+</ul>
+<pre><code class="language-swift">let h: Float = world.heightAt(x: 1234.5, z: -987.0)
+let groundY = world.worldY(forHeight: h)   // where to stand the player</code></pre>
+</div>
+
+<div class="api-item" id="mtterrainconfig">
+<h2>MTTerrainConfig</h2>
+<div class="sig"><span class="type-name">public struct MTTerrainConfig</span></div>
+<p>Everything tunable about the world in one value type. Grab <code>.default</code>, change what you want, assign to <code>world.config</code>.</p>
+<table>
+<thead><tr><th>Field</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>chunkResolution</code></td><td><code>64</code></td><td>Vertices per chunk side (64×64 height samples).</td></tr>
+<tr><td><code>chunkWorldSize</code></td><td><code>128</code></td><td>World units across one chunk.</td></tr>
+<tr><td><code>viewDistance</code></td><td><code>6</code></td><td>Chunk <strong>radius</strong> around camera — chunks ≈ (2·6+1)² = 169.</td></tr>
+<tr><td><code>seaLevel</code></td><td><code>0.45</code></td><td>Normalized height of the water plane.</td></tr>
+<tr><td><code>heightScale</code></td><td><code>60</code></td><td>World units of vertical relief at height 1.</td></tr>
+<tr><td><code>biomes</code></td><td><code>MTBiome.default</code></td><td>The biome table.</td></tr>
+<tr><td><code>noise</code></td><td>defaults</td><td>Height-field noise config.</td></tr>
+<tr><td><code>structureNoise</code></td><td>defaults</td><td><strong>Separate</strong> noise field for structure placement.</td></tr>
+<tr><td><code>structuresEnabled</code></td><td><code>true</code></td><td>Master switch (live via <code>world.structuresEnabled</code>).</td></tr>
+<tr><td><code>structureDensity</code></td><td><code>0.35</code></td><td>0…1 — fraction of candidate spots kept.</td></tr>
+<tr><td><code>waterColor</code> / <code>fogColor</code> / <code>fogDensity</code></td><td>—</td><td>Water and fog appearance (linear RGB).</td></tr>
+</tbody>
+</table>
+<div class="callout warn"><p><strong>Performance:</strong> <code>viewDistance</code> and <code>chunkResolution</code> dominate memory and frame cost —
+see <a href="guide-performance.html">Performance</a> before raising them.</p></div>
+</div>
+
+<div class="api-item" id="mtbiome">
+<h2>MTBiome</h2>
+<div class="sig"><span class="type-name">public struct MTBiome</span></div>
+<p>One biome = one height band of the world, with its colors and behavior.</p>
+<pre><code class="language-swift">public struct MTBiome {
+    public var name: String
+    public var minHeight: Float   // normalized 0...1, inclusive
+    public var maxHeight: Float   // normalized 0...1, exclusive
+    public var groundColor: SIMD3&lt;Float&gt;  // linear RGB 0...1
+    public var slopeColor: SIMD3&lt;Float&gt;?  // steep-slope override (cliffs)
+    public var emitsLight: Bool           // e.g. lava biome
+
+    public init(name: String, minHeight: Float, maxHeight: Float,
+                groundColor: SIMD3&lt;Float&gt;, slopeColor: SIMD3&lt;Float&gt;? = nil,
+                emitsLight: Bool = false)
+}
+
+extension MTBiome {
+    /// deepOcean, ocean, beach, grass, forest, mountain, snowyPeak
+    public static var `default`: [MTBiome] { ... }
+}</code></pre>
+<ul>
+<li><strong><code>name</code></strong> is the identity — <code>setBiome</code> matches by name; a custom biome with an existing name <strong>replaces</strong> it.</li>
+<li><strong><code>minHeight</code> inclusive, <code>maxHeight</code> exclusive</strong> — adjacent biomes tile without gaps when contiguous.</li>
+<li>Colors are <strong>linear RGB</strong> 0…1, baked into vertex colors at mesh build.</li>
+<li><strong><code>slopeColor</code></strong> — steep slopes render as cliffs in this color.</li>
+<li><strong><code>emitsLight</code></strong> — self-illuminated (lava-style glow), skips NdotL darkening.</li>
+</ul>
+<p>Full table and recipes: <a href="guide-biomes.html">Biome Authoring</a>.</p>
+</div>
+
+<div class="api-item" id="mtcapabilities">
+<h2>MTCapabilities</h2>
+<div class="sig"><span class="type-name">public enum MTCapabilities</span></div>
+<p>Runtime feature detection for M3-family GPU features. Query the actual device, never the device name.</p>
+<pre><code class="language-swift">public static func supportsHardwareRayTracing(device: MTLDevice) -&gt; Bool
+public static func supportsMeshShading(device: MTLDevice) -&gt; Bool</code></pre>
+<ul>
+<li><strong>Ray tracing:</strong> <code>device.supportsRayTracing</code> (iOS 16+).</li>
+<li><strong>Mesh shading:</strong> <code>device.supportsFamily(.apple9)</code> (iOS 17+).</li>
+</ul>
+<p>Both true is necessary but not sufficient — the library must also be compiled with the
+<code>M3_FEATURES</code> flag. See <a href="chip-support.html">Chip Support</a>.</p>
+</div>
+
+<div class="api-item" id="mtraytracing">
+<h2>MTRayTracing</h2>
+<div class="sig"><span class="type-name">public final class MTRayTracing</span> <span class="badge m3">M3_FEATURES only</span></div>
+<p>Hardware ray-traced sun shadows on terrain. Only compiled when the library is built with
+<code>M3_FEATURES</code>; on unsupported devices the renderer keeps <code>rayTracing</code> nil
+and uses the analytic shadow path.</p>
+<pre><code class="language-swift">public init(device: MTLDevice)
+public var isSupported: Bool { get }
+public var topLevelStructure: MTLAccelerationStructure? { get }
+public func update(chunks: [(id: Int, vertexBuffer: MTLBuffer,
+                             indexBuffer: MTLBuffer, indexCount: Int,
+                             transform: matrix_float4x4)])</code></pre>
+<ul>
+<li><strong><code>topLevelStructure</code></strong> — the TLAS over the visible chunk set; what the shadow pass intersects.</li>
+<li><strong><code>update(chunks:)</code></strong> — rebuilds BLAS per chunk + TLAS. The renderer calls this; it's public for custom integrations.</li>
+</ul>
+<p>Details: <a href="guide-raytracing.html">Ray Tracing</a>.</p>
+</div>
+
+<div class="api-item" id="mtskybox">
+<h2>MTSkybox</h2>
+<div class="sig"><span class="type-name">public final class MTSkybox</span></div>
+<p>Gradient sky dome with a visible sun disc. Works on <strong>all</strong> devices — not gated behind <code>M3_FEATURES</code>.</p>
+<pre><code class="language-swift">public init(device: MTLDevice)
+public var sunAzimuth: Float     // radians; 0 = +X, increasing toward +Z
+public var sunElevation: Float  // radians above horizon; 0 = horizon
+public func draw(encoder: MTLRenderCommandEncoder,
+                 viewProjection: matrix_float4x4)</code></pre>
+<ul>
+<li>Sun angles are <strong>live</strong> — changes apply on the next draw, and terrain lighting always agrees.</li>
+<li><code>renderer.skybox</code> is created by default and drawn first each frame; set to <code>nil</code> to disable.</li>
+</ul>
+<p>Details: <a href="guide-skybox.html">Skybox</a>.</p>
+</div>
+
+<div class="api-item" id="noise">
+<h2>Noise types</h2>
+<h3>MTNoiseConfig</h3>
+<pre><code class="language-swift">public struct MTNoiseConfig {
+    public var seed: UInt64
+    public var octaves: Int          // 1...12, default 5
+    public var baseFrequency: Double // default 0.008 (lower = bigger features)
+    public var amplitude: Double     // default 1.0
+    public var lacunarity: Double    // default 2.03
+    public var gain: Double          // default 0.5
+    public var warpStrength: Double  // default 0.35 (0 = off)
+    public var warpFrequency: Double // default 0.02
+    public var ridged: Bool          // default false (mountain mode)
+}</code></pre>
+<p>Configuration for one noise field (terrain height, or the separate structure-placement field).
+Value type — copy and mutate freely. See <a href="guide-noise.html">Noise Tuning</a>.</p>
+<h3>MTSeededRandom</h3>
+<pre><code class="language-swift">public struct MTSeededRandom {
+    public init(seed: UInt64)
+    public mutating func next() -&gt; UInt64
+    public mutating func nextDouble() -&gt; Double   // 0...1
+    public mutating func nextFloat() -&gt; Float     // 0...1
+    public mutating func nextInt(upperBound: Int) -&gt; Int
+}</code></pre>
+<p>Deterministic xorshift64* PRNG driving the whole pipeline.</p>
+<h3>MTChunk / MTChunkCoord</h3>
+<pre><code class="language-swift">public struct MTChunkCoord: Hashable {
+    public var x: Int
+    public var z: Int
+}
+public struct MTChunk {
+    public var coord: MTChunkCoord
+    public var heights: [Float]  // resolution×resolution, row-major, 0...1
+    public var resolution: Int
+}</code></pre>
+</div>
+
+<div class="api-item" id="structures">
+<h2>Structures</h2>
+<h3>MTStructureKind</h3>
+<pre><code class="language-swift">public enum MTStructureKind: String, CaseIterable {
+    case house, tower, tree, boulder, well, windmill, dungeon
+}</code></pre>
+<p>Seven placeable types, each with one low-poly mesh (boulder ≈ 0.7×, dungeon ≈ 1.9×),
+drawn with a single instanced draw call per kind.</p>
+<h3>MTStructurePlacement</h3>
+<pre><code class="language-swift">public struct MTStructurePlacement {
+    public var kind: MTStructureKind
+    public var position: SIMD3&lt;Float&gt;  // world coords, y = terrain height
+    public var rotationY: Float        // radians around Y
+    public var scale: Float            // uniform scale multiplier
+}</code></pre>
+<p><code>position.y</code> is already world-space terrain height — drop the transform straight into your scene.</p>
+</div>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Examples — MetalTerrain Docs</title>
+<meta name="description" content="Copy-paste MetalTerrain code examples: cameras, biomes, sun, minimaps.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Examples</h1>
+<p class="lead">Copy-paste snippets for common tasks. All assume <code>import MetalTerrain</code>.</p>
+
+<h2>Minimal app (UIKit)</h2>
+<pre><code class="language-swift">import MetalTerrain
+
+class ViewController: UIViewController {
+    var terrainView: MTTerrainView!
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        terrainView = MTTerrainView(frame: view.bounds)
+        terrainView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        terrainView.world = MTTerrainWorld(seed: 1337)
+        view.addSubview(terrainView)
+
+        // Safe spawn for the player
+        let spawn = terrainView.world!.findSafeSpawn()
+        let groundY = terrainView.world!.worldY(
+            forHeight: terrainView.world!.heightAt(x: Double(spawn.x), z: Double(spawn.y)))
+
+        terrainView.onFrame = { [weak self] tv, dt in
+            guard let self else { return }
+            let aspect = Float(tv.bounds.width / tv.bounds.height)
+            tv.setCamera(position: [spawn.x, groundY + 60, spawn.y + 120],
+                         target: [spawn.x, groundY, spawn.y],
+                         aspect: aspect)
+        }
+    }
+}</code></pre>
+
+<h2>Orbit camera (drag to rotate, pinch to zoom)</h2>
+<pre><code class="language-swift">var yaw: Float = -0.6, pitch: Float = 0.62, distance: Float = 550
+var target = SIMD3&lt;Float&gt;(0, 0, 0)
+
+terrainView.onFrame = { tv, dt in
+    let aspect = Float(tv.bounds.width / tv.bounds.height)
+    let cp = cos(pitch)
+    let pos = target + SIMD3&lt;Float&gt;(sin(yaw) * cp, sin(pitch), cos(yaw) * cp) * distance
+    tv.setCamera(position: pos, target: target, aspect: aspect)
+}
+// Wire yaw/pitch/distance to your gesture recognizers:
+//   drag → yaw -= dx * 0.0055; pitch = clamp(pitch - dy * 0.0055, 0.08, 1.35)
+//   pinch → distance = clamp(distance / scale, 40, 1200)</code></pre>
+
+<h2>Walk mode (first-person, water blocks movement)</h2>
+<pre><code class="language-swift">var playerPos = world.findSafeSpawn()
+var walkYaw: Float = 0, walkPitch: Float = -0.1
+let eyeHeight: Float = 2.0
+
+terrainView.onFrame = { tv, dt in
+    // moveInput: SIMD2&lt;Float&gt; from your joystick (x = strafe, y = forward)
+    let speed: Float = 45
+    let fwd = SIMD2&lt;Float&gt;(sin(walkYaw), cos(walkYaw))
+    let right = SIMD2&lt;Float&gt;(-fwd.y, fwd.x)
+    let delta = (fwd * moveInput.y + right * moveInput.x) * speed * Float(min(dt, 0.1))
+
+    // Don&#x27;t walk into the ocean
+    let tryPos = playerPos + delta
+    if world.heightAt(x: Double(tryPos.x), z: Double(tryPos.y)) &gt;= world.config.seaLevel {
+        playerPos = tryPos
+    }
+
+    let groundY = world.worldY(forHeight: world.heightAt(x: Double(playerPos.x), z: Double(playerPos.y)))
+    let eye = SIMD3&lt;Float&gt;(playerPos.x, groundY + eyeHeight, playerPos.y)
+    let cp = cos(walkPitch)
+    let look = SIMD3&lt;Float&gt;(sin(walkYaw) * cp, sin(walkPitch), cos(walkYaw) * cp)
+    let aspect = Float(tv.bounds.width / tv.bounds.height)
+    tv.setCamera(position: eye, target: eye + look * 10, aspect: aspect)
+}</code></pre>
+
+<h2>Sun controls (sky + lighting move together)</h2>
+<pre><code class="language-swift">// Sliders in degrees → radians
+func setSun(azimuthDeg: Float, elevationDeg: Float) {
+    renderer.sunAzimuth = azimuthDeg * .pi / 180
+    renderer.sunElevation = elevationDeg * .pi / 180
+    // terrainView.skybox follows automatically via the renderer.
+    // On M3_FEATURES builds, ray-traced shadows track the same sun.
+}</code></pre>
+
+<h2>Custom biome world (desert planet)</h2>
+<pre><code class="language-swift">let world = MTTerrainWorld(seed: 99, config: .default)
+
+var config = MTTerrainConfig.default
+config.seaLevel = 0.40
+world.config = config
+
+// Replace built-ins by name
+world.setBiome(MTBiome(name: &quot;grass&quot;, minHeight: 0.45, maxHeight: 0.62,
+                       groundColor: SIMD3(0.84, 0.68, 0.42)))  // sand, not grass
+world.setBiome(MTBiome(name: &quot;forest&quot;, minHeight: 0.62, maxHeight: 0.78,
+                       groundColor: SIMD3(0.76, 0.57, 0.33),
+                       slopeColor: SIMD3(0.58, 0.38, 0.24)))
+world.setBiome(MTBiome(name: &quot;mountain&quot;, minHeight: 0.78, maxHeight: 0.90,
+                       groundColor: SIMD3(0.58, 0.38, 0.24),
+                       slopeColor: SIMD3(0.42, 0.27, 0.17)))</code></pre>
+
+<h2>Minimap from chunk heightmaps</h2>
+<pre><code class="language-swift">// Deterministic — same seed always gives the same map
+func minimapTile(at coord: MTChunkCoord, into image: inout CGContext) {
+    let chunk = world.generateChunk(at: coord)
+    for y in 0..&lt;chunk.resolution {
+        for x in 0..&lt;chunk.resolution {
+            let h = chunk.heights[y * chunk.resolution + x]
+            let biome = world.biomeAt(height: h)
+            // plot biome.groundColor at (x, y)
+        }
+    }
+}</code></pre>
+
+<h2>Quality toggle (M3-only extras)</h2>
+<pre><code class="language-swift">import MetalTerrain
+
+// Show an &quot;Enhanced&quot; toggle only where it does something
+enhancedToggle.isHidden = !MTCapabilities.supportsHardwareRayTracing(device: device)
+
+// The renderer already enables RT + mesh shading automatically when built
+// with M3_FEATURES on a supported device — nothing else to wire up.</code></pre>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

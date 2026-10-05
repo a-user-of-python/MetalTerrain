@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Noise Tuning — MetalTerrain Docs</title>
+<meta name="description" content="MTNoiseConfig knobs explained with terrain recipes: archipelago, hills, peaks, canyonlands.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Noise Tuning</h1>
+<p class="lead"><code>MTNoiseConfig</code> is the soul of your world — nine knobs deciding between
+archipelago, rolling hills, jagged peaks, or canyonlands.</p>
+<p>The pipeline: seeded permutation table → 2D gradient (Perlin) noise → fractal layers (fbm) →
+optional domain warp → normalized 0…1 height. Every stage is deterministic.</p>
+
+<h2>The knobs</h2>
+
+<h3><code>seed</code> <span style="color:var(--text-faint)">(default 1337)</span></h3>
+<p>Which world. <strong>Turn this up for:</strong> a brand-new world when you like the <em>style</em> but not the <em>layout</em>.</p>
+
+<h3><code>octaves</code> <span style="color:var(--text-faint)">(default 5, range 1…12)</span></h3>
+<p>Detail layers. Lower (1–3): smooth, stylized. Higher (7–12): rich, craggy. Cost is roughly linear per octave —
+prefer 5–6 for interactive regeneration.</p>
+
+<h3><code>baseFrequency</code> <span style="color:var(--text-faint)">(default 0.008)</span></h3>
+<div class="callout"><p><strong>Most misunderstood knob:</strong> <em>lower</em> frequency = <em>larger</em> features.
+<code>0.004</code> → vast continents; <code>0.02</code> → busy, cramped bumps.</p></div>
+
+<h3><code>lacunarity</code> <span style="color:var(--text-faint)">(default 2.03)</span></h3>
+<p>How much finer each octave gets. Higher (2.5–3.5): crisp, crystalline. Lower (1.5–1.8): soft, weathered.</p>
+
+<h3><code>gain</code> <span style="color:var(--text-faint)">(default 0.5)</span></h3>
+<p>Amplitude falloff per octave. Higher (0.6–0.75): rough, chaotic. Lower (0.3–0.4): broad shapes dominate.</p>
+
+<h3><code>warpStrength</code> <span style="color:var(--text-faint)">(default 0.35, 0 = off)</span></h3>
+<p>Domain warp — the sample point is pushed around by a second noise field. This is what makes coastlines wind
+and valleys meander. 0.2–0.4 is the natural sweet spot; 0.6–1.0 gets wild and marbled.</p>
+
+<h3><code>warpFrequency</code> <span style="color:var(--text-faint)">(default 0.02)</span></h3>
+<p>Scale of the warp pattern. Tune <em>with</em> warpStrength: strong + low frequency = grand sweeping curves;
+strong + high frequency = tangled spaghetti.</p>
+
+<h3><code>ridged</code> <span style="color:var(--text-faint)">(default false)</span></h3>
+<p><strong>Mountain mode.</strong> Each octave becomes (1 − |n|)² → sharp crests and V-valleys.
+The difference between hills and the Alps.</p>
+
+<h3><code>amplitude</code> <span style="color:var(--text-faint)">(default 1.0)</span></h3>
+<p>Overall multiplier before normalization. Prefer <code>config.heightScale</code> when you want the same
+<em>shapes</em> but taller in world units.</p>
+
+<h2>Recipes</h2>
+
+<h3>Archipelago — scattered islands</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig.default
+noise.octaves = 4
+noise.baseFrequency = 0.006      // broad features → distinct islands
+noise.warpStrength = 0.55        // winding, organic coastlines
+noise.ridged = false
+
+var config = MTTerrainConfig.default
+config.noise = noise
+config.seaLevel = 0.58           // drown everything but the island tops
+world.config = config</code></pre>
+
+<h3>Rolling hills — gentle pastoral land</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig.default
+noise.octaves = 3
+noise.baseFrequency = 0.006
+noise.warpStrength = 0.45
+noise.gain = 0.35                // broad shapes dominate
+noise.ridged = false
+
+var config = MTTerrainConfig.default
+config.noise = noise
+config.seaLevel = 0.40
+config.heightScale = 40          // soft relief
+world.config = config</code></pre>
+
+<h3>Jagged peaks — alpine ridgelines</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig.default
+noise.octaves = 6
+noise.baseFrequency = 0.010
+noise.lacunarity = 2.2
+noise.gain = 0.55
+noise.warpStrength = 0.30
+noise.ridged = true              // ← mountain mode
+
+var config = MTTerrainConfig.default
+config.noise = noise
+config.seaLevel = 0.35
+config.heightScale = 90
+world.config = config</code></pre>
+<p>Then widen the snow band (<a href="guide-biomes.html">Biome Authoring, Recipe 1</a>) so peaks read as alpine.</p>
+
+<h3>Canyonlands — eroded plateaus and ravines</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig.default
+noise.octaves = 5
+noise.baseFrequency = 0.012
+noise.lacunarity = 2.6
+noise.gain = 0.6
+noise.warpStrength = 0.15        // keep strata readable
+noise.ridged = true
+
+var config = MTTerrainConfig.default
+config.noise = noise
+config.seaLevel = 0.30
+config.heightScale = 70
+world.config = config</code></pre>
+
+<h2>Seed reproducibility</h2>
+<div class="callout good"><p><strong>Guarantee: same seed + same config = same world, everywhere.</strong>
+<code>heightAt(x:z:)</code> is a pure function of the seed — gameplay code and rendered meshes can never disagree.</p></div>
+<ul>
+<li>The structure field (<code>config.structureNoise</code>) has its own seed — re-roll structures without reshaping terrain.</li>
+<li><strong>Caveat:</strong> changing <em>any</em> noise knob produces a different world. Version your config alongside the seed if you ship seeds to users.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

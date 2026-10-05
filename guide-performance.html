@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance Guide — MetalTerrain Docs</title>
+<meta name="description" content="Chunk budgets, LOD math, memory estimates, and per-device settings for 60 fps.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Performance Guide</h1>
+<p class="lead">MetalTerrain targets 60 fps on Apple Silicon. The math to budget chunks, what LOD buys you,
+memory estimates, and per-device settings.</p>
+<p>All numbers use defaults (<code>chunkResolution</code> 64, <code>chunkWorldSize</code> 128, <code>viewDistance</code> 6).</p>
+
+<h2>Chunk budget math</h2>
+<p><code>viewDistance</code> is a chunk <strong>radius</strong>. Live chunks = (2 × viewDistance + 1)².</p>
+<table>
+<thead><tr><th>viewDistance</th><th>Chunks</th><th>Horizon</th></tr></thead>
+<tbody>
+<tr><td>4</td><td>81</td><td>~512 units</td></tr>
+<tr><td><strong>6 (default)</strong></td><td><strong>169</strong></td><td><strong>~768 units</strong></td></tr>
+<tr><td>8</td><td>289</td><td>~1024 units</td></tr>
+<tr><td>10</td><td>441</td><td>~1280 units</td></tr>
+</tbody>
+</table>
+<p>Each full-res chunk = 64×64 grid → <strong>7,938 triangles</strong>. At viewDistance 6 that's ~1.34M tris
+worst case — before LOD. Triangle count scales with the <em>square</em> of viewDistance.</p>
+<div class="callout warn"><p><strong>The two dials:</strong> <code>viewDistance</code> controls <em>how much world</em> is visible
+(cost ∝ square — turn down first). <code>chunkResolution</code> controls <em>detail per chunk</em> (turn down second).</p></div>
+
+<h2>LOD behavior</h2>
+<p>Chunks <strong>beyond <code>viewDistance / 2</code></strong> build at <strong>half resolution</strong> automatically
+— ¼ the vertices, ¼ the triangles. At viewDistance 6:</p>
+<table>
+<thead><tr><th>Band</th><th>Chunks</th><th>Tris/chunk</th><th>Total</th></tr></thead>
+<tbody>
+<tr><td>Near (≤ 3)</td><td>49</td><td>7,938</td><td>~389K</td></tr>
+<tr><td>Far (&gt; 3)</td><td>120</td><td>~1,985</td><td>~238K</td></tr>
+<tr><td><strong>Total</strong></td><td><strong>169</strong></td><td>—</td><td><strong>~627K</strong></td></tr>
+</tbody>
+</table>
+<p>LOD cuts the worst case roughly in half. Tune fog so the LOD boundary sits inside the haze.</p>
+
+<h2>Instancing (structures)</h2>
+<p>One low-poly mesh per kind (7 kinds), <strong>one instanced draw call per kind</strong> — a hundred trees = one draw call.
+<code>structureDensity</code> affects instance <em>count</em>, not draw calls.</p>
+
+<h2>Memory estimates</h2>
+<p>Per full-res chunk (64×64): vertices ~144 KB + indices ~95 KB + CPU heightmap ~16 KB ≈ <strong>~255 KB</strong>.
+Per half-res chunk: ≈ <strong>~64 KB</strong>.</p>
+<p>Steady state at viewDistance 6 (49 full + 120 half): <strong>~20 MB</strong> total.</p>
+<ul>
+<li>Doubling <code>viewDistance</code> ≈ <strong>4×</strong> memory.</li>
+<li>Doubling <code>chunkResolution</code> ≈ <strong>4×</strong> per-chunk memory.</li>
+<li>Shared vertex format: position (float3) + normal (float3) + color (float3) = <strong>36 bytes/vertex</strong>.</li>
+<li>Chunk pooling: out-of-range chunks return buffers to a pool — steady-state movement allocates ~zero new GPU buffers.</li>
+</ul>
+
+<h2>Recommended settings per device</h2>
+<table>
+<thead><tr><th>Device</th><th>viewDistance</th><th>chunkResolution</th><th>octaves</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>M1 iPad / iPhone 14-class</strong></td><td>5</td><td>64</td><td>5</td><td>The 60 fps baseline.</td></tr>
+<tr><td><strong>M2 / M3</strong></td><td>6</td><td>64</td><td>5–6</td><td>Defaults are comfortable.</td></tr>
+<tr><td><strong>M4</strong></td><td>7–8</td><td>64–96</td><td>6</td><td>Headroom for denser worlds.</td></tr>
+</tbody>
+</table>
+<p>If frames drop, in order: <strong>(1)</strong> lower <code>viewDistance</code> by 1–2,
+<strong>(2)</strong> lower <code>chunkResolution</code> to 48, <strong>(3)</strong> lower <code>octaves</code> to 4,
+<strong>(4)</strong> disable structures to isolate the cost.</p>
+<div class="callout"><p><strong>Fill-rate check:</strong> <code>renderer.wireframe = true</code> — if wireframe runs dramatically
+faster, you're fragment-bound (overdraw, water transparency). Reduce overdraw, not chunks.</p></div>
+
+<h2>Profiling</h2>
+<p>Xcode 16 + Instruments → <strong>Metal System Trace</strong>, on a <strong>physical device</strong> (the Simulator
+tells you nothing useful about GPU performance):</p>
+<ul>
+<li><strong>Frame time:</strong> 16.7 ms budget. Consistent misses = structural (too many chunks); spikes = generation hitches.</li>
+<li><strong>Vertex vs. fragment:</strong> vertex-heavy → reduce resolution/distance; fragment-heavy → check water overdraw and fog.</li>
+<li><strong>Generation hitches:</strong> chunk generation runs on CPU during <code>update</code> — profile Time Profiler at <code>generateChunk</code> / mesh building.</li>
+</ul>
+
+<h2>Checklist before shipping</h2>
+<ul class="checklist">
+<li>Profiled on the <strong>lowest device you support</strong>, not just the newest.</li>
+<li><code>far</code> plane ≥ <code>viewDistance × chunkWorldSize</code>.</li>
+<li>Fog tuned so the LOD boundary sits in haze.</li>
+<li><code>aspect</code> updated on rotation.</li>
+<li>Seed + config versioned together if persisted/shared.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

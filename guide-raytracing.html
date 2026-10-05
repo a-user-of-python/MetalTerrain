@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ray Tracing — MetalTerrain Docs</title>
+<meta name="description" content="Hardware ray-traced sun shadows in MetalTerrain: supported chips, how to enable, architecture.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Hardware Ray Tracing <span class="badge m3">M3+ only</span></h1>
+<p class="lead">MetalTerrain can use Apple Silicon's <strong>hardware ray-tracing units</strong> for
+<strong>ray-traced sun shadows on terrain</strong>. Shadow rays are traced from each surface point
+toward the sun against an acceleration structure built from the actual chunk geometry —
+mountains and cliffs cast true shadows on each other.</p>
+
+<h2>Supported hardware</h2>
+<p>See the full matrix on <a href="chip-support.html">Chip Support</a>. In short:
+<strong>M3/M4/M5</strong> (all variants) and <strong>A17&nbsp;Pro / A18 / A18&nbsp;Pro / A19 / A19&nbsp;Pro</strong> and later.
+<strong>Not</strong> supported: M1/M2 (all variants), A16 and earlier.</p>
+<p>The library never assumes support from the device name — it queries
+<code>device.supportsRayTracing</code> via <code>MTCapabilities</code>.</p>
+
+<h2>Enabling it</h2>
+<p>Two gates, <strong>both</strong> required:</p>
+<ol>
+<li><strong>Build gate — the <code>M3_FEATURES</code> Swift compilation condition.</strong>
+All ray-tracing code compiles only when this flag is set, e.g.
+<pre><code class="language-swift">// swift build:
+swift build -Xswiftc -D -Xswiftc M3_FEATURES
+
+// Xcode: add M3_FEATURES to &#x27;Other Swift Flags&#x27;
+// AND -DM3_FEATURES to &#x27;Other Metal Compiler Flags&#x27;
+// (both compilers — without the Metal flag, mesh/RT shaders never compile)</code></pre>
+A standard build (no flag) contains no ray-tracing code at all and runs on every supported device.</li>
+<li><strong>Runtime gate — the device check.</strong> With the flag on, <code>MTTerrainRenderer</code> calls
+<code>MTCapabilities.supportsHardwareRayTracing(device:)</code> at init and only creates
+<code>rayTracing</code> when the GPU answers yes.</li>
+</ol>
+<div class="callout good"><p><strong>You don't do this by hand in the normal case:</strong> a renderer built with
+<code>M3_FEATURES</code> enables ray-traced sun shadows automatically on supported devices, and silently
+falls back to the analytic shadow path on everything else.</p></div>
+<pre><code class="language-swift">import MetalTerrain
+
+if MTCapabilities.supportsHardwareRayTracing(device: device) {
+    // Hardware present. renderer.rayTracing is non-nil only when
+    // the library was ALSO built with M3_FEATURES.
+}</code></pre>
+
+<h2>How acceleration structures work here</h2>
+<ul>
+<li><strong>BLAS (bottom-level): one per chunk.</strong> Each visible chunk's triangle mesh is baked into its own
+bottom-level acceleration structure — built once when the chunk's buffers are created, dropped when recycled.</li>
+<li><strong>TLAS (top-level): one per frame.</strong> Built over the visible chunk set with each chunk's world transform.
+This is what the shadow pass intersects against.</li>
+</ul>
+<p><strong>Rebuild policy:</strong> the TLAS rebuilds when the visible chunk set changes (the same streaming in
+<code>renderer.update(cameraTarget:)</code>). Chunks never move or deform once built — a stable camera means a
+stable TLAS and zero build cost per frame.</p>
+<pre><code class="language-swift">// The renderer calls this for you; public for custom integrations:
+rayTracing.update(chunks: [
+    (id: 0, vertexBuffer: vb0, indexBuffer: ib0, indexCount: n0, transform: t0),
+    // … one entry per visible chunk
+])</code></pre>
+
+<h2>Performance notes</h2>
+<ul>
+<li><strong>Build cost is the whole price.</strong> BLAS once per chunk, TLAS once per visible-set change. Steady state costs one ray per fragment in the shadow pass — what the hardware units are for.</li>
+<li><strong>Fast camera moves cost builds, not hitches.</strong> Streaming bounds new chunks per frame; shadows may lag a frame behind new geometry, never a frame drop.</li>
+<li><strong>Memory:</strong> each BLAS is roughly proportional to the chunk's vertex buffer; released with the chunk.</li>
+</ul>
+
+<div class="callout warn"><p><strong>Caveats:</strong> new and needs device testing — shadow quality and build latency on
+A17&nbsp;Pro-class GPUs are unvalidated. Ray tracing covers <strong>sun shadows on terrain only</strong>;
+structures, water, and skybox use existing paths. On unsupported devices the analytic shadow term is used and the
+visual difference is intentionally subtle.</p></div>
+
+<h2>See also</h2>
+<ul>
+<li><a href="guide-meshshading.html">Mesh Shading</a> — the other M3-family feature (they combine).</li>
+<li><a href="guide-skybox.html">Skybox</a> — the sun position shadows are traced toward.</li>
+<li><a href="api.html#mtraytracing">MTRayTracing</a> · <a href="api.html#mtcapabilities">MTCapabilities</a></li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>
