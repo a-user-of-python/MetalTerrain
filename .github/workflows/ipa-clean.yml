@@ -2,6 +2,11 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.1.1). Leave empty to auto-increment.'
+        required: false
+        default: ''
   push:
     tags:
       - "v*"
@@ -52,3 +57,36 @@ jobs:
         with:
           name: TerrainDemo-unsigned
           path: TerrainDemo-unsigned.ipa
+
+      - name: Determine version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INPUT_VERSION="${{ inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            LATEST=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+            if [ -z "$LATEST" ]; then
+              VERSION="v0.1.0"
+            else
+              NUM=${LATEST#v}
+              MAJOR=$(echo $NUM | cut -d. -f1)
+              MINOR=$(echo $NUM | cut -d. -f2)
+              PATCH=$(echo $NUM | cut -d. -f3)
+              PATCH=$((PATCH + 1))
+              VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            fi
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing $VERSION"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.version }}" \
+            TerrainDemo-unsigned.ipa \
+            --title "${{ steps.version.outputs.version }}" \
+            --notes "MetalTerrain demo build."
