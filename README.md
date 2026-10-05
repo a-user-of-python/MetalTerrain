@@ -112,3 +112,5 @@ game assets.
 MetalTerrain is released under a permissive MIT-style grant: use it in personal
 or commercial apps, modify it, redistribute it, with attribution. See
 [LICENSE](LICENSE).
+
+> Built with Muse — AI-assisted development.
