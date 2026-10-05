@@ -13,7 +13,7 @@ struct ContentView: View {
     @State private var showsWater = true
     @State private var fogEnabled = true
     @State private var viewDistance = 6
-    @State private var cameraMode: CameraMode = .orbit
+    @State private var cameraMode: CameraMode = .walk
     @State private var playerHeight: Float = 2
     @State private var moveInput = SIMD2<Float>(0, 0)
     @State private var fps: Double = 0
@@ -90,14 +90,14 @@ struct ContentView: View {
                 }
 
                 // Walk-mode joystick (bottom-left, only in walk mode)
-                if cameraMode == .walk {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            JoystickView(input: $moveInput)
-                                .frame(width: 140, height: 140)
-                                .padding(.leading, 24)
-                                .padding(.bottom, 24)
+                // Joystick: walk mode (move player) and orbit mode (move target).
+                VStack {
+                    Spacer()
+                    HStack {
+                        JoystickView(input: $moveInput)
+                            .frame(width: 140, height: 140)
+                            .padding(.leading, 24)
+                            .padding(.bottom, 24)
                             Spacer()
                         }
                     }

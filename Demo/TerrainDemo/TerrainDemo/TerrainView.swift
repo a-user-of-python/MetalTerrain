@@ -335,6 +335,23 @@ struct TerrainView: UIViewRepresentable {
                 // Keep the chunk streamer centered on the player.
                 target = SIMD3<Float>(playerPos.x, 0, playerPos.y)
             } else {
+                // Orbit mode: joystick moves the target (camera follows).
+                let input = parent.moveInput
+                if input.x != 0 || input.y != 0 {
+                    let speed: Float = 120  // world units/sec
+                    let dt = min(frameDt, 0.1)
+                    // Move relative to camera yaw.
+                    let forward = SIMD2<Float>(sin(yaw), cos(yaw))
+                    let right = SIMD2<Float>(forward.y, -forward.x)
+                    let delta = (forward * -input.y + right * input.x) * speed * dt
+                    target.x += delta.x
+                    target.z += delta.y
+                    // Keep target above terrain.
+                    if let world {
+                        let gy = world.worldY(forHeight: world.heightAt(x: Double(target.x), z: Double(target.z)))
+                        target.y = gy + 10
+                    }
+                }
                 let cp = cos(pitch)
                 camPosition = target + SIMD3<Float>(sin(yaw) * cp, sin(pitch), cos(yaw) * cp) * distance
                 camTarget = target
