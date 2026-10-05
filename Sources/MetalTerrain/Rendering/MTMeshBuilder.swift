@@ -291,9 +291,18 @@ public enum MTMeshBuilder {
         default: material = 0  // grass, forest
         }
         let slope = 1.0 - normalY
-        // On mountainsides (high altitude + moderate slope), force rock to
-        // prevent grass/forest banding from height oscillation.
-        if h > 0.68 && slope > 0.25 {
+        // On mountains (high altitude), force rock to prevent grass/forest
+        // banding from height oscillation. Wide threshold (0.65) ensures
+        // no grass stripes appear on mountainsides.
+        if h > 0.65 {
+            // Blend to snow at the top, rock below.
+            if h > 0.80 {
+                let t = min(1.0, (h - 0.80) / 0.12)
+                let rock = SIMD3<Float>(0.45, 0.42, 0.38)
+                let snow = SIMD3<Float>(0.90, 0.92, 0.95)
+                let c = rock + (snow - rock) * t
+                return (c, h > 0.92 ? 4 : 3)  // snow materials
+            }
             return (SIMD3<Float>(0.45, 0.42, 0.38), 1)  // rock, no banding
         }
         if slope > cliffSlopeThreshold, let cliff = biome.slopeColor {
