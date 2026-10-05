@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var fps: Double = 0
     // Renderer ref for direct sun updates (bypasses SwiftUI re-render).
     @State private var terrainRenderer: MTTerrainRenderer?
+    /// Polls renderer.currentFPS 2x/sec (avoids render-loop @State writes).
+    private let fpsTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
 
@@ -35,7 +37,6 @@ struct ContentView: View {
                     showsWater: $showsWater,
                     fogEnabled: $fogEnabled,
                     viewDistance: $viewDistance,
-                    fps: $fps,
                     dragMode: $dragMode,
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
@@ -47,6 +48,11 @@ struct ContentView: View {
                     }
                 )
                 .ignoresSafeArea()
+                .onReceive(fpsTimer) { _ in
+                    // Poll from timer (not render loop) to avoid
+                    // "modifying state during view update".
+                    if let r = terrainRenderer { fps = r.currentFPS }
+                }
 
                 // Show/hide button (top-right, always reachable)
                 VStack {

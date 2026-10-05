@@ -109,6 +109,8 @@ public final class MTTerrainRenderer {
     /// Sun position: azimuth (0-360°, direction) and elevation (0-90°, height).
     public var sunAzimuth: Float = 45
     public var sunElevation: Float = 50
+    /// Last measured FPS (written by the demo's render loop, polled by UI).
+    public var currentFPS: Double = 0
     /// Render distance in chunks (radius). Changing this updates the world
     /// config, which triggers a cache invalidation and rebuild.
     public var viewDistance: Int {

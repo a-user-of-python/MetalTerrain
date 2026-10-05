@@ -67,8 +67,6 @@ struct TerrainView: UIViewRepresentable {
     @Binding var showsWater: Bool
     @Binding var fogEnabled: Bool
     @Binding var viewDistance: Int
-    /// Updated ~2x/sec with the frame-time EMA.
-    @Binding var fps: Double
     /// Mac Catalyst: what mouse-drag does (touch devices always orbit).
     @Binding var dragMode: DragMode
     /// Orbit vs first-person walk.
@@ -127,8 +125,8 @@ struct TerrainView: UIViewRepresentable {
             preset: .constant(.default), structuresEnabled: .constant(true),
             wireframe: .constant(false), showsWater: .constant(true),
             fogEnabled: .constant(true), viewDistance: .constant(6),
-            fps: .constant(0), dragMode: .constant(.orbit),
-            cameraMode: .constant(.orbit), playerHeight: .constant(8),
+            dragMode: .constant(.orbit),
+            cameraMode: .constant(.walk), playerHeight: .constant(2),
             moveInput: .constant(SIMD2<Float>(0, 0))
         )
         private var device: MTLDevice?
@@ -288,10 +286,9 @@ struct TerrainView: UIViewRepresentable {
                 }
                 if now - lastFPSPush > 0.5 {
                     lastFPSPush = now
-                    let value = fpsEMA
-                    DispatchQueue.main.async { [weak self] in
-                        self?.parent.$fps.wrappedValue = value
-                    }
+                    // Store on renderer; ContentView polls via timer (avoids
+                    // "modifying state during view update" from the render loop).
+                    renderer?.currentFPS = fpsEMA
                 }
             }
             lastFrameTime = now
