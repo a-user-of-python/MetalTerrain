@@ -20,7 +20,7 @@ public struct MTTerrainConfig {
     public var fogDensity: Float
 
     public init(
-        chunkResolution: Int = 96,
+        chunkResolution: Int = 128,
         chunkWorldSize: Float = 1000,
         viewDistance: Int = 6,
         seaLevel: Float = 0.45,

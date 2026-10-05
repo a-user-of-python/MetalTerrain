@@ -39,6 +39,7 @@ struct MTVaryings {
     float3 worldPos;
     float3 normal;
     float3 color;
+    float material;  // 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water
 };
 
 // Shared vertex transform: model matrix, then view-projection.
@@ -52,6 +53,7 @@ vertex MTVaryings terrain_vertex(const device MTVertexIn *vertices [[buffer(0)]]
     out.worldPos = world.xyz;
     out.normal = (uniforms.model * float4(v.normal.xyz, 0.0)).xyz;
     out.color = v.color.rgb;
+    out.material = v.color.a;
     return out;
 }
 
@@ -59,11 +61,48 @@ vertex MTVaryings terrain_vertex(const device MTVertexIn *vertices [[buffer(0)]]
 float3 applyLighting(float3 albedo,
                      float3 normal,
                      float3 worldPos,
+                     float material,
                      constant MTUniforms &uniforms) {
     float3 n = normalize(normal);
-    float ndl = max(dot(n, uniforms.lightDir.xyz), 0.0);
+    float3 viewDir = normalize(uniforms.cameraPos.xyz - worldPos);
+    float3 lightDir = normalize(uniforms.lightDir.xyz);
+
+    // Diffuse: NdotL with wrap for softer terminator.
+    float ndl = dot(n, lightDir);
+    float wrapNdl = clamp((ndl + 0.4) / 1.4, 0.0, 1.0);
     float amb = uniforms.lightDir.w;
-    float3 lit = albedo * (amb + ndl * (1.0 - amb));
+
+    // Per-material specular: (intensity, shininess)
+    // 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water
+    float specIntensity;
+    float specShininess;
+    if (material < 0.5) {           // grass: matte
+        specIntensity = 0.08; specShininess = 16.0;
+    } else if (material < 1.5) {    // rock: rough, slight sheen
+        specIntensity = 0.15; specShininess = 24.0;
+    } else if (material < 2.5) {    // sand: very matte
+        specIntensity = 0.05; specShininess = 12.0;
+    } else if (material < 3.5) {    // snow: soft glow
+        specIntensity = 0.25; specShininess = 32.0;
+    } else if (material < 4.5) {    // deep snow: sparkly
+        specIntensity = 0.45; specShininess = 64.0;
+    } else {                        // water: mirror-like
+        specIntensity = 0.85; specShininess = 128.0;
+    }
+
+    // Specular: Blinn-Phong using Metal's built-in reflect/normalize/pow.
+    float3 halfVec = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(n, halfVec), 0.0), specShininess) * specIntensity;
+    // Only on upward faces (not cliffs).
+    spec *= clamp(n.y * 1.5, 0.0, 1.0);
+
+    // Fresnel rim: subtle edge glow using built-in pow.
+    float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.25;
+
+    float3 lit = albedo * (amb + wrapNdl * (1.0 - amb));
+    lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint
+    lit += fresnel * albedo;
+
     float dist = distance(worldPos, uniforms.cameraPos.xyz);
     float dens = uniforms.fogColor.w;
     float f = 1.0 - exp(-dens * dens * dist * dist);
@@ -79,7 +118,7 @@ fragment float4 terrain_fragment(MTVaryings in [[stage_in]],
     float n2 = fract(sin(dot(floor(p.xz) + 1.0, float2(12.9898, 78.233))) * 43758.5453);
     float detail = mix(n, n2, 0.5) - 0.5;  // -0.5 ... 0.5
     float3 varied = in.color * (1.0 + detail * 0.12);
-    float3 col = applyLighting(varied, in.normal, in.worldPos, uniforms);
+    float3 col = applyLighting(varied, in.normal, in.worldPos, in.material, uniforms);
     return float4(col, 1.0);
 }
 
@@ -92,7 +131,7 @@ fragment float4 water_fragment(MTVaryings in [[stage_in]],
                            0.0,
                            0.03 * cos(t * 1.3 + in.worldPos.z * 0.31));
     float3 n = normalize(in.normal + ripple);
-    float3 col = applyLighting(in.color, n, in.worldPos, uniforms);
+    float3 col = applyLighting(in.color, n, in.worldPos, 5.0, uniforms);  // water
     return float4(col, alpha);
 }
 
@@ -110,11 +149,12 @@ vertex MTVaryings structure_vertex(const device MTVertexIn *vertices [[buffer(0)
     out.worldPos = world.xyz;
     out.normal = (inst.model * float4(v.normal.xyz, 0.0)).xyz;
     out.color = v.color.rgb * inst.tint.rgb;
+    out.material = 1.0;  // structures are rock-like
     return out;
 }
 
 fragment float4 structure_fragment(MTVaryings in [[stage_in]],
                                    constant MTUniforms &uniforms [[buffer(1)]]) {
-    float3 col = applyLighting(in.color, in.normal, in.worldPos, uniforms);
+    float3 col = applyLighting(in.color, in.normal, in.worldPos, in.material, uniforms);
     return float4(col, 1.0);
 }

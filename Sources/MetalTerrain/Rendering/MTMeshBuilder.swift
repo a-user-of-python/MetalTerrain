@@ -93,7 +93,7 @@ public enum MTMeshBuilder {
         level: Float,
         color: SIMD3<Float> = SIMD3<Float>(0.16, 0.42, 0.66)
     ) -> (vertices: [MTVertex], indices: [UInt32]) {
-        let segments = 16
+        let segments = 64
         let n = segments + 1
         var vertices: [MTVertex] = []
         vertices.reserveCapacity(n * n)
@@ -185,10 +185,11 @@ public enum MTMeshBuilder {
                 let wz = originZ + Float(j) / Float(res - 1) * worldSize
                 let wy = world.worldY(forHeight: height)
 
+                let (rgb, material) = groundColor(height: height, normalY: normal.y, world: world)
                 vertices.append(MTVertex(
                     position: SIMD3<Float>(wx, wy, wz),
                     normal: normal,
-                    color: groundColor(height: height, normalY: normal.y, world: world)
+                    color: SIMD4<Float>(rgb, material)  // material ID in alpha
                 ))
             }
         }
@@ -271,11 +272,21 @@ public enum MTMeshBuilder {
         height h: Float,
         normalY: Float,
         world: MTTerrainWorld
-    ) -> SIMD3<Float> {
+    ) -> (SIMD3<Float>, Float) {
         let biome = world.biomeAt(height: h)
+        // Material ID for per-material specular: 0=grass, 1=rock, 2=sand,
+        // 3=snow, 4=deep snow, 5=water.
+        let material: Float
+        switch biome.name {
+        case "deepOcean", "ocean": material = 5
+        case "beach": material = 2
+        case "mountain": material = 1
+        case "snowyPeak": material = h > 0.92 ? 4 : 3
+        default: material = 0  // grass, forest
+        }
         let slope = 1.0 - normalY
         if slope > cliffSlopeThreshold, let cliff = biome.slopeColor {
-            return cliff
+            return (cliff, 1)  // cliffs are rock
         }
         var color = biome.groundColor
         let e = biomeBlendRange
@@ -300,7 +311,7 @@ public enum MTMeshBuilder {
             color = min(color * 1.6 + SIMD3<Float>(repeating: 0.12),
                         SIMD3<Float>(repeating: 1.0))
         }
-        return color
+        return (color, material)
     }
 
     /// Linear interpolation for SIMD3 colors (Metal's `mix` has no Swift equivalent).
