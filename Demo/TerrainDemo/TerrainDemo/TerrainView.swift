@@ -288,7 +288,7 @@ struct TerrainView: UIViewRepresentable {
                     lastFPSPush = now
                     // Store on renderer; ContentView polls via timer (avoids
                     // "modifying state during view update" from the render loop).
-                    renderer?.currentFPS = fpsEMA
+                    renderer.currentFPS = fpsEMA
                 }
             }
             lastFrameTime = now
