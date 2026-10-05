@@ -308,7 +308,7 @@ struct TerrainView: UIViewRepresentable {
                 let dt = min(frameDt, 0.1)
                 let forward = SIMD2<Float>(sin(walkYaw), cos(walkYaw))
                 let right = SIMD2<Float>(forward.y, -forward.x)
-                let delta = (forward * -input.y + right * input.x) * speed * dt
+                let delta = (forward * input.y + right * input.x) * speed * dt
                 // Water blocking: don't walk into the ocean.
                 let tryPos = playerPos + delta
                 let tryHeight = world.heightAt(x: Double(tryPos.x), z: Double(tryPos.y))
@@ -343,7 +343,7 @@ struct TerrainView: UIViewRepresentable {
                     // Move relative to camera yaw.
                     let forward = SIMD2<Float>(sin(yaw), cos(yaw))
                     let right = SIMD2<Float>(forward.y, -forward.x)
-                    let delta = (forward * -input.y + right * input.x) * speed * dt
+                    let delta = (forward * input.y + right * input.x) * speed * dt
                     target.x += delta.x
                     target.z += delta.y
                     // Keep target above terrain.
