@@ -22,6 +22,7 @@ struct ContentView: View {
     /// Polls renderer.currentFPS 2x/sec (avoids render-loop @State writes).
     private let fpsTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     @State private var shaderEffectsEnabled = false
+    @State private var usesMetal4 = false
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
 
@@ -46,7 +47,10 @@ struct ContentView: View {
                     onRendererReady: { renderer in
                         // Dispatch async: setting @State during updateUIView
                         // triggers "modifying state during view update".
-                        DispatchQueue.main.async { terrainRenderer = renderer }
+                        DispatchQueue.main.async {
+                            terrainRenderer = renderer
+                            usesMetal4 = renderer.usesMetal4
+                        }
                     }
                 )
                 .ignoresSafeArea()
@@ -130,6 +134,7 @@ struct ContentView: View {
                 terrainRenderer?.sunElevation = el
             },
             shaderEffectsEnabled: $shaderEffectsEnabled,
+            usesMetal4: usesMetal4,
             fps: fps,
             dragMode: $dragMode,
             onRegenerate: regenerate,

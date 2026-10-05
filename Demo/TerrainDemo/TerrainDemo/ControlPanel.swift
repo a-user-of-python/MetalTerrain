@@ -44,6 +44,7 @@ struct ControlPanel: View {
     @Binding var playerHeight: Float
     var onSunChange: (Float, Float) -> Void
     @Binding var shaderEffectsEnabled: Bool
+    var usesMetal4: Bool
     var fps: Double
     @Binding var dragMode: DragMode
     var onRegenerate: () -> Void
@@ -168,6 +169,9 @@ struct ControlPanel: View {
                 .font(.headline)
                 .bold()
                 .monospacedDigit()
+            Text(usesMetal4 ? "Metal 4" : "Metal 3")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
         }
         .padding(14)
         .background(Color.black.opacity(0.78))
