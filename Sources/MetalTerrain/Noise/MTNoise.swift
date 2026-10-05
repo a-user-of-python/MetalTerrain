@@ -174,6 +174,7 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     }
 
     // ── Mountain ranges: ridged noise, masked to range bands ──
+    // Low frequency = wide ranges spanning multiple chunks.
     // Only ~35% of land gets mountains; the rest stays as plains/hills.
     var rangeConfig = config
     rangeConfig.octaves = 4
@@ -182,7 +183,10 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
                              nx: (x + 1000) * continentFreq,
                              ny: (y - 1000) * continentFreq, noise: warpNoise)
     let mountainMask = max(0, min(1, (rangeMask - 0.08) * 2.2))  // 0..1
-    let ridged = mtRidgedSum(config: rangeConfig, nx: nx * 1.5, ny: ny * 1.5,
+    // Mountain shape at 0.35x frequency: ranges 3x wider, spanning chunks.
+    let mtnFreq = config.baseFrequency * 0.35
+    let ridged = mtRidgedSum(config: rangeConfig,
+                             nx: x * mtnFreq, ny: y * mtnFreq,
                              noise: noise)
     let mountains = max(0, ridged) * mountainMask * mountainMask
 
@@ -217,7 +221,7 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     // Plains: flatten detail where mountains are absent.
     let plainsFlatten = 1 - mountainMask * 0.7
     var h = 0.5 + continent * 0.55 + detail * 0.28 * plainsFlatten
-    h += mountains * 0.38
+    h += mountains * 0.55
     // River depth scales with elevation: deep in mountains, shallow at coast.
     let elevationFactor = max(0.15, min(1, (h - 0.45) * 3))
     h -= riverCarveMasked * 0.28 * elevationFactor
