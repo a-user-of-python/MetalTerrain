@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  ios-build:
+    name: Archive demo app (unsigned IPA)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Archive (no signing)
+        run: |
+          xcodebuild archive \
+            -project Demo/TerrainDemo/TerrainDemo.xcodeproj \
+            -scheme TerrainDemo \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/TerrainDemo.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        run: |
+          APP=build/TerrainDemo.xcarchive/Products/Applications/TerrainDemo.app
+          test -d "$APP" || { echo "missing: $APP"; exit 1; }
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -r -y TerrainDemo-unsigned.ipa Payload
+          rm -rf Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TerrainDemo-unsigned
+          path: TerrainDemo-unsigned.ipa
