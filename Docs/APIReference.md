@@ -359,6 +359,8 @@ public final class MTTerrainRenderer {
 
     public var wireframe: Bool
     public var showsWater: Bool
+    public var skybox: MTSkybox?
+    public var rayTracing: MTRayTracing?  // nil unless built with M3_FEATURES
 }
 ```
 
@@ -395,6 +397,18 @@ Debugging aid; default `false`.
 **`showsWater`** — `true` (default) draws the translucent water plane at sea
 level after the terrain.
 
+**`skybox`** — the sky renderer, created by default and drawn first each
+frame (behind terrain). Works on all devices. Set to `nil` to disable sky
+rendering. See [MTSkybox](#mtskybox) and [Skybox.md](Skybox.md).
+
+**`rayTracing`** — the hardware ray-traced sun-shadow system, or `nil`. It is
+non-nil only when **both** hold: the library was compiled with the
+`M3_FEATURES` Swift compilation condition, **and** the device passes
+`MTCapabilities.supportsHardwareRayTracing(device:)`. The renderer drives it
+automatically (BLAS per chunk, TLAS over the visible set, rebuilt when the
+visible set changes). See [MTRayTracing](#mtraytracing) and
+[RayTracing.md](RayTracing.md).
+
 ### Threading & lifecycle
 
 - `update` and `draw` are **not thread-safe with each other** — call both from
@@ -403,3 +417,98 @@ level after the terrain.
   `structures(in:)`) are safe to call from background threads.
 - The renderer holds its `world` strongly; breaking a retain cycle (renderer →
   world → …) is your responsibility if you tear the scene down.
+
+---
+
+## MTCapabilities
+
+```swift
+public enum MTCapabilities {
+    public static func supportsHardwareRayTracing(device: MTLDevice) -> Bool
+    public static func supportsMeshShading(device: MTLDevice) -> Bool
+}
+```
+
+Runtime feature detection for the M3-family GPU features. Query the actual
+device, never the device name.
+
+**`supportsHardwareRayTracing(device:)`** — true when `device.supportsRayTracing`
+(iOS 16+). Supported: M3/M3 Pro/M3 Max/M3 Ultra, M4/M4 Pro/M4 Max, M5 and
+later, plus A17 Pro, A18, A18 Pro, A19, A19 Pro and later. **Not** supported:
+M1/M2 (all variants), A16 and earlier.
+
+**`supportsMeshShading(device:)`** — true when
+`device.supportsFamily(.apple9)` (iOS 17+). Same chip list as ray tracing.
+
+Both returning true is necessary but not sufficient for the features to be
+active — the library must also be compiled with the `M3_FEATURES` Swift
+compilation condition. Without the flag, `MTRayTracing` and the mesh-shader
+path don't exist in the binary at all. See [RayTracing.md](RayTracing.md) and
+[MeshShading.md](MeshShading.md).
+
+---
+
+## MTRayTracing
+
+```swift
+public final class MTRayTracing {
+    public init(device: MTLDevice)
+    public var isSupported: Bool { get }
+    public var topLevelStructure: MTLAccelerationStructure? { get }
+    public func update(chunks: [(id: Int, vertexBuffer: MTLBuffer,
+                                 indexBuffer: MTLBuffer, indexCount: Int,
+                                 transform: matrix_float4x4)])
+}
+```
+
+Hardware ray-traced sun shadows on terrain. Only compiled in when the library
+is built with `M3_FEATURES`; on unsupported devices it is never instantiated
+(the renderer keeps `rayTracing` nil and uses the analytic shadow path).
+
+**`init(device:)`** — creates the ray-tracing system for this device.
+
+**`isSupported`** — whether this device has hardware ray tracing. Mirrors
+`MTCapabilities.supportsHardwareRayTracing(device:)`.
+
+**`topLevelStructure`** — the TLAS over the currently visible chunk set, or
+`nil` before the first `update`. What the shadow pass intersects against.
+
+**`update(chunks:)`** — rebuilds the acceleration structures: one BLAS per
+chunk (from its vertex/index buffers), one TLAS over the set with each chunk's
+world `transform`. Call when the visible chunk set changes (the renderer does
+this from its own streaming in `update(cameraTarget:)`); a stable visible set
+needs no rebuild. `id` identifies the chunk (use its grid id) so unchanged
+chunks can reuse their BLAS.
+
+New feature — needs device testing. See [RayTracing.md](RayTracing.md) for the
+full picture (supported chips, build flag, performance notes, caveats).
+
+---
+
+## MTSkybox
+
+```swift
+public final class MTSkybox {
+    public init(device: MTLDevice)
+    public var sunAzimuth: Float     // radians; 0 = +X, increasing toward +Z
+    public var sunElevation: Float  // radians above horizon; 0 = horizon
+    public func draw(encoder: MTLRenderCommandEncoder,
+                     viewProjection: matrix_float4x4)
+}
+```
+
+Gradient sky dome with a visible sun disc. Works on **all** devices — not
+gated behind `M3_FEATURES`. The renderer creates one by default
+(`renderer.skybox`) and draws it first each frame; set `renderer.skybox = nil`
+to disable.
+
+**`sunAzimuth` / `sunElevation`** — the sun's position in radians. These are the
+same angles the terrain lighting (and, on M3-family builds, the ray-traced
+shadows) use, so sky and terrain always agree. Both are live — changes apply
+on the next `draw`.
+
+**`draw(encoder:viewProjection:)`** — encodes the sky pass into an existing
+render encoder. `viewProjection` is the frame's combined view-projection
+matrix. Call before encoding terrain so the sky lands behind everything.
+
+See [Skybox.md](Skybox.md) for integration and semantics.

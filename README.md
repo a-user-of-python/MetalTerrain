@@ -75,9 +75,13 @@ Sources/MetalTerrain/
                             low-poly mesh builders, seeded placement
   Rendering/
     MTMeshBuilder.swift     heightmap -> indexed triangle mesh + LOD
-    MTShaders.metal         lighting, fog, water shaders
+    MTShaders.metal         lighting, fog, water shaders (+ RT shadows w/ M3_FEATURES)
+    MTMeshShaders.metal     object/mesh shaders for terrain (M3_FEATURES only)
+    MTSkyShaders.metal      skybox shaders (all devices)
     MTTerrainRenderer.swift Metal 3/4 renderer, chunk streaming, instancing
     MTTerrainView.swift     MTKView subclass — zero-boilerplate integration
+    MTRayTracing.swift      hardware ray-traced shadows (M3_FEATURES only)
+    MTSkybox.swift          skybox with visible sun (all devices)
 Docs/                      the documentation set
 ```
 
