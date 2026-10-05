@@ -74,18 +74,19 @@ float3 applyLighting(float3 albedo,
 
     // Per-material specular: (intensity, shininess)
     // 0=grass, 1=rock, 2=sand, 3=snow, 4=deep snow, 5=water
+    // Rock least, sand barely, grass slightly more.
     float specIntensity;
     float specShininess;
-    if (material < 0.5) {           // grass: matte
-        specIntensity = 0.08; specShininess = 16.0;
-    } else if (material < 1.5) {    // rock: rough, slight sheen
-        specIntensity = 0.15; specShininess = 24.0;
-    } else if (material < 2.5) {    // sand: very matte
-        specIntensity = 0.05; specShininess = 12.0;
+    if (material < 0.5) {           // grass: slight sheen
+        specIntensity = 0.12; specShininess = 24.0;
+    } else if (material < 1.5) {    // rock: least reflective, rough
+        specIntensity = 0.03; specShininess = 12.0;
+    } else if (material < 2.5) {    // sand: barely, diffuse
+        specIntensity = 0.06; specShininess = 16.0;
     } else if (material < 3.5) {    // snow: soft glow
-        specIntensity = 0.25; specShininess = 32.0;
+        specIntensity = 0.22; specShininess = 32.0;
     } else if (material < 4.5) {    // deep snow: sparkly
-        specIntensity = 0.45; specShininess = 64.0;
+        specIntensity = 0.40; specShininess = 64.0;
     } else {                        // water: mirror-like
         specIntensity = 0.85; specShininess = 128.0;
     }
@@ -96,8 +97,8 @@ float3 applyLighting(float3 albedo,
     // Only on upward faces (not cliffs).
     spec *= clamp(n.y * 1.5, 0.0, 1.0);
 
-    // Fresnel rim: subtle edge glow using built-in pow.
-    float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.25;
+    // Fresnel rim: subtle edge definition (kept low to avoid plastic look).
+    float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.12;
 
     float3 lit = albedo * (amb + wrapNdl * (1.0 - amb));
     lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint
