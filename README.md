@@ -1,40 +1,40 @@
-> **This repo is no longer updated.** Future development continues at [a-user-of-python/NativeMetalTerrain](https://github.com/a-user-of-python/NativeMetalTerrain).
-
 # MetalTerrain
 
-A 3D terrain generation library for iOS — **Swift + native Metal 3** (Metal 4 fast paths where available).
+A 3D terrain generation **library** for iOS — Swift + native Metal (Metal 4 fast paths where available, Metal 3 fallback).
 
 Chunked, seeded, infinite 3D heightmap terrain with streaming, data-driven biomes,
-exposed noise controls, automatic seeded structure placement (houses, towers,
-trees, boulders, wells, windmills, dungeons as low-poly 3D meshes), and a
-vertex-color renderer with fog, water, and LOD — targeting 60 fps on Apple Silicon.
+exposed noise controls, automatic seeded structure placement, and a vertex-color
+renderer with fog, water, and LOD — targeting 60 fps on Apple Silicon.
+
+**Design principle:** the library owns everything Metal — LOD, shaders, pipelines,
+chunk streaming, instancing. Your app only handles what it must: the view
+hierarchy, camera, input, and UI.
 
 ## The 30-second pitch
 
-Add one Swift package, write ten lines, and your app has an endless explorable
+Add one Swift package, write five lines, and your app has an endless explorable
 3D world: mountains, beaches, oceans, forests, snowy peaks, plus scattered
 low-poly structures — all deterministic from a single seed. Change the seed and
 get a brand-new planet. No assets, no textures, no physics engine, no
 third-party code.
 
-## Quickstart (about 10 lines)
+## Quickstart (5 lines)
 
 ```swift
 import MetalTerrain
-import MetalKit
 
-let device = MTLCreateSystemDefaultDevice()!
-let world = MTTerrainWorld(seed: 1337)                        // your planet
-let renderer = MTTerrainRenderer(device: device, world: world) // GPU side
-renderer.setCamera(position: [0, 220, 320], target: [0, 0, 0],
-                   fovDegrees: 60, aspect: 16.0 / 9.0,
-                   near: 0.1, far: 6000)
-renderer.update(cameraTarget: SIMD2(0, 0))  // call every frame
-renderer.draw(in: mtkView)                 // call every frame
+let terrainView = MTTerrainView(frame: view.bounds)
+terrainView.world = MTTerrainWorld(seed: 1337)
+view.addSubview(terrainView)
+
+terrainView.onFrame = { tv, dt in
+    // Your camera logic here — the library handles the rest.
+    tv.setCamera(position: eye, target: lookAt, aspect: aspect)
+}
 ```
 
-See [Docs/Quickstart.md](Docs/Quickstart.md) for the full 5-minute integration,
-including camera setup and the demo app.
+For full control (custom MTKView, manual render loop), use `MTTerrainRenderer`
+directly. See [Docs/Quickstart.md](Docs/Quickstart.md).
 
 ## Features
 
@@ -43,8 +43,9 @@ including camera setup and the demo app.
 - **Data-driven biomes** — 7 built-ins (deep ocean, ocean, beach, grass, forest, mountain, snowy peak) keyed on normalized height; add or override your own at runtime.
 - **Exposed noise config** — seed, octaves, frequency, lacunarity, gain, domain warp, and a ridged "mountain mode".
 - **Seeded structures** — houses, towers, trees, boulders, wells, windmills, dungeons placed by a second noise field; one instanced draw call per kind; live on/off toggle.
-- **Metal 3 renderer** — one indexed vertex buffer per chunk (baked vertex colors, slope-based cliffs), a transparent water plane at sea level, simple directional lighting + distance fog; Metal 4 argument-table fast paths on iOS 26+ devices that support them.
-- **LOD** — far chunks build at half resolution automatically.
+- **Metal renderer** — one indexed vertex buffer per chunk (baked vertex colors, slope-based cliffs), a transparent water plane at sea level, simple directional lighting + distance fog; Metal 4 fast paths on iOS 26+ devices that support them.
+- **LOD** — far chunks build at half resolution automatically. Handled internally; the app never touches it.
+- **Per-material specular** — rock, sand, grass, snow, and water each get their own specular response. No ray tracing.
 - **Zero assets** — vertex colors only; no textures, no downloads.
 
 ## Requirements
@@ -53,14 +54,8 @@ including camera setup and the demo app.
 |---|---|
 | iOS | 17.0+ |
 | Chip | Apple Silicon (A-series 11+ / M-series) |
-| Xcode | 16.0+ |
+| Xcode | 16.0+ (26+ for Metal 4 fast paths) |
 | Language | Swift 5.9+ |
-
-> **Not yet verified on device.** The library is implemented against the design
-> contract in `DESIGN.md` and host-tested where possible, but it has **not yet
-> been run on physical iOS hardware**. Treat all "60 fps on M1+" claims as
-> design targets until someone confirms them on a real device. The demo app
-> (`Demo/TerrainDemo`) exists to prove the API end to end.
 
 ## Project layout
 
@@ -74,7 +69,7 @@ Sources/MetalTerrain/
     MTConfig.swift          MTTerrainConfig (all tweakables, .default)
     MTBiome.swift           MTBiome + built-in biome table
     MTChunk.swift           MTChunkCoord (Hashable), MTChunk heightmap grid
-    MTTerrainWorld.swift    MTTerrainWorld — the main public API
+    MTTerrainWorld.swift    MTTerrainWorld — world API, findSafeSpawn
   Structures/
     MTStructures.swift      MTStructureKind, MTStructurePlacement,
                             low-poly mesh builders, seeded placement
@@ -82,33 +77,34 @@ Sources/MetalTerrain/
     MTMeshBuilder.swift     heightmap -> indexed triangle mesh + LOD
     MTShaders.metal         lighting, fog, water shaders
     MTTerrainRenderer.swift Metal 3/4 renderer, chunk streaming, instancing
-Demo/TerrainDemo/          SwiftUI + MTKView demo app
-Docs/                      the documentation set (start here)
+    MTTerrainView.swift     MTKView subclass — zero-boilerplate integration
+Docs/                      the documentation set
 ```
+
+## Public API
+
+| Type | Purpose |
+|---|---|
+| `MTTerrainView` | Drop-in MTKView. Set `world`, drive camera via `setCamera`, done. |
+| `MTTerrainRenderer` | Lower-level renderer for custom MTKView setups. |
+| `MTTerrainWorld` | World generation: `heightAt`, `biomeAt`, `findSafeSpawn`, chunk gen. |
+| `MTTerrainConfig` | All tweakables (chunk size, view distance, noise, sea level...). |
+| `MTBiome` | Biome definition; `setBiome`/`removeBiome` for customization. |
 
 ## Docs
 
-- [Docs/Quickstart.md](Docs/Quickstart.md) — 5-minute integration: add the package, first terrain, camera, first tweaks.
-- [Docs/APIReference.md](Docs/APIReference.md) — every public type and method: signatures, defaults, semantics, determinism notes.
-- [Docs/BiomeAuthoring.md](Docs/BiomeAuthoring.md) — how biomes map from height, the built-in table, custom biome recipes (higher mountains, lava, underwater).
-- [Docs/NoiseTuning.md](Docs/NoiseTuning.md) — what each noise knob does, with "turn this up for X" recipes: archipelago, rolling hills, jagged peaks, canyonlands.
-- [Docs/PerformanceGuide.md](Docs/PerformanceGuide.md) — chunk budget math, LOD, instancing, memory estimates, per-device settings, profiling.
-- [DESIGN.md](DESIGN.md) — the design contract the implementation must match (authoritative for API signatures).
+- [Docs/Quickstart.md](Docs/Quickstart.md) — 5-minute integration.
+- [Docs/APIReference.md](Docs/APIReference.md) — every public type and method.
+- [Docs/BiomeAuthoring.md](Docs/BiomeAuthoring.md) — biome system and custom biome recipes.
+- [Docs/NoiseTuning.md](Docs/NoiseTuning.md) — noise knobs and terrain recipes.
+- [Docs/PerformanceGuide.md](Docs/PerformanceGuide.md) — chunk budgets, LOD, per-device settings.
+- [DESIGN.md](DESIGN.md) — the design contract.
 
 ## License
 
 All code is **written fresh for this project** — no third-party code, no copied
-game assets. The concepts are inspired by the `sb_terrain` Scratch extension
-(seeded noise, height-threshold biomes, structure noise field), but every line
-of source is original.
+game assets.
 
 MetalTerrain is released under a permissive MIT-style grant: use it in personal
 or commercial apps, modify it, redistribute it, with attribution. See
 [LICENSE](LICENSE).
-
-## Status
-
-- API design: **done** (`DESIGN.md`, matches the implementation contract exactly)
-- Implementation: **in progress** — sibling agents are building the modules now
-- Demo app: planned
-- On-device verification: **not yet** (see honesty note above)
