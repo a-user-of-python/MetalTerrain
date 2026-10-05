@@ -357,7 +357,16 @@ public final class MTTerrainRenderer {
 
     public func draw(in view: MTKView)
 
+    /// Renders skybox + terrain into an offscreen texture from an arbitrary
+    /// camera. For real-time mirror reflections and other app-level effects.
+    /// Use a small texture (e.g. 256x128) — structures and water are skipped.
+    public func renderReflection(to texture: MTLTexture,
+                                 from cameraPosition: SIMD3<Float>,
+                                 lookingAt target: SIMD3<Float>,
+                                 fovDegrees: Float = 70)
+
     public var wireframe: Bool
+    public var detailAmount: Float  // 0...1, procedural 3D geometric detail
     public var showsWater: Bool
     public var skybox: MTSkybox?
     public var rayTracing: MTRayTracing?  // nil unless built with M3_FEATURES
