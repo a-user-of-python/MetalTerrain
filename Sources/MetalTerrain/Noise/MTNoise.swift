@@ -176,8 +176,9 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     // ── Mountain ranges: ridged noise, masked to range bands ──
     // Low frequency = wide ranges spanning multiple chunks.
     // Only ~35% of land gets mountains; the rest stays as plains/hills.
+    // 6 octaves + peak rounding for smooth (not pointy) summits.
     var rangeConfig = config
-    rangeConfig.octaves = 4
+    rangeConfig.octaves = 6
     rangeConfig.ridged = true
     let rangeMask = mtFBMSum(config: continentConfig,
                              nx: (x + 1000) * continentFreq,
@@ -188,7 +189,9 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     let ridged = mtRidgedSum(config: rangeConfig,
                              nx: x * mtnFreq, ny: y * mtnFreq,
                              noise: noise)
-    let mountains = max(0, ridged) * mountainMask * mountainMask
+    // Round the peaks: pow <1 softens the sharp ridged cusps.
+    let rounded = pow(max(0, ridged), 0.72)
+    let mountains = rounded * mountainMask * mountainMask
 
     // ── Rivers: wide carved valleys along low-frequency meanders ──
     // Lower frequency = longer, more continuous rivers that reach the ocean.
