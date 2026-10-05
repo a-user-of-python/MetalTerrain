@@ -304,7 +304,7 @@ struct TerrainView: UIViewRepresentable {
                 let speed: Float = 45  // world units/sec at full tilt
                 let dt = min(frameDt, 0.1)
                 let forward = SIMD2<Float>(sin(walkYaw), cos(walkYaw))
-                let right = SIMD2<Float>(forward.y, -forward.x)
+                let right = SIMD2<Float>(-forward.y, forward.x)
                 let delta = (forward * input.y + right * input.x) * speed * dt
                 // Water blocking: don't walk into the ocean.
                 let tryPos = playerPos + delta
@@ -337,9 +337,9 @@ struct TerrainView: UIViewRepresentable {
                 if input.x != 0 || input.y != 0 {
                     let speed: Float = 120  // world units/sec
                     let dt = min(frameDt, 0.1)
-                    // Move relative to camera yaw.
-                    let forward = SIMD2<Float>(sin(yaw), cos(yaw))
-                    let right = SIMD2<Float>(forward.y, -forward.x)
+                    // Forward = away from camera (camera looks toward target).
+                    let forward = SIMD2<Float>(-sin(yaw), -cos(yaw))
+                    let right = SIMD2<Float>(-forward.y, forward.x)
                     let delta = (forward * input.y + right * input.x) * speed * dt
                     target.x += delta.x
                     target.z += delta.y
