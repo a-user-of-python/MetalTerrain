@@ -391,8 +391,13 @@ instanced draw per structure kind. Uses `MTL4CommandBuffer` / argument-table
 fast paths on iOS 26+ devices that support them, and the standard Metal 3 path
 otherwise — selected at runtime, never crashes on older OS.
 
-**`wireframe`** — `true` renders triangle edges instead of filled faces.
+**`wireframe`** — `true` renders a smooth animated wireframe overlay (flowing contour lines + grid with a pulse wave) instead of raw triangle edges.
 Debugging aid; default `false`.
+
+**`detailAmount`** — `0`…`1` (default `1`). Procedural 3D geometric detail:
+displaces vertices by material-specific noise so grass, rock, sand, and snow
+get real physical texture instead of flat shading. Water animates with time.
+Set to `0` to disable for maximum performance.
 
 **`showsWater`** — `true` (default) draws the translucent water plane at sea
 level after the terrain.
