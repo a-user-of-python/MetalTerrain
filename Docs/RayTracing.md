@@ -14,21 +14,25 @@ This is an M3-family feature only — see the chip list below.
 
 ## Supported hardware
 
-**Supported:** M3, M3 Pro, M3 Max, M3 Ultra, M4, M4 Pro, M4 Max, M5 (and later
-Apple Silicon), plus iPhone/iPad chips **A17 Pro, A18, A18 Pro, A19, A19 Pro**
-(and later).
+> **iOS only for now.** MetalTerrain targets iPhone and iPad — there is no Mac
+> build yet.
 
-**Not supported:** M1, M2 (all variants including Pro/Max/Ultra), A16 and
-earlier iPhone chips.
+**Supported iPads (M3+):**
+- iPad Pro 11" (M4, 2024), iPad Pro 13" (M4, 2024)
+- iPad Air 11" (M3, 2025), iPad Air 13" (M3, 2025)
+- iPad mini (A17 Pro, 7th gen, 2024)
 
-The library never assumes support from the device name. Runtime checks used:
+**Supported iPhones:**
+- iPhone 15 Pro / Pro Max (A17 Pro)
+- iPhone 16 / 16 Plus / 16e (A18), iPhone 16 Pro / Pro Max (A18 Pro)
+- iPhone 17 series (A19 / A19 Pro)
 
-- Ray tracing: `device.supportsRayTracing` (available iOS 16+).
-- Mesh shading: `device.supportsFamily(.apple9)` (available iOS 17+).
+**Not supported:** M1/M2 iPads (all), A16 and earlier iPhones.
 
-Both are wrapped in `MTCapabilities` (see
-[APIReference.md](APIReference.md#mtcapabilities)) so your code can branch on
-the actual GPU in front of it.
+The library never assumes support from the device name. The runtime check is
+`device.supportsFamily(.apple9)` (available iOS 17+), wrapped in
+`MTCapabilities` (see [APIReference.md](APIReference.md#mtcapabilities))
+so your code can branch on the actual GPU in front of it.
 
 ---
 
