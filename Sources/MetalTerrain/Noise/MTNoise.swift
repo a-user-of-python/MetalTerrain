@@ -225,9 +225,18 @@ func mtHeightSample(x: Double, y: Double, config: MTNoiseConfig,
     let plainsFlatten = 1 - mountainMask * 0.7
     var h = 0.5 + continent * 0.55 + detail * 0.28 * plainsFlatten
     h += mountains * 0.55
-    // River depth scales with elevation: deep in mountains, shallow at coast.
-    let elevationFactor = max(0.15, min(1, (h - 0.45) * 3))
-    h -= riverCarveMasked * 0.28 * elevationFactor
+    // Coastal shelf: flatten near sea level for visible beaches.
+    // Smoothstep from 0.40 (full flat) to 0.55 (no effect).
+    let coastalT = max(0, min(1, (h - 0.40) / 0.15))
+    let coastalFlat = coastalT * coastalT * (3 - 2 * coastalT)
+    h = 0.46 + (h - 0.46) * (0.25 + 0.75 * coastalFlat)
+    // River depth: carve to below sea level near coast (so rivers hold water),
+    // shallower in highlands. Masked to avoid carving mountainsides.
+    let riverValleyMask = 1 - mountainMask * 0.85
+    let elevationFactor = max(0.3, min(1, (h - 0.45) * 3))
+    let targetDepth = max(0, h - 0.42)  // carve down to 0.42 (below sea level)
+    let carveAmount = min(0.35 * elevationFactor, targetDepth)
+    h -= riverCarveMasked * riverValleyMask * carveAmount
 
     return Float(min(max(h, 0.0), 1.0))
 }
