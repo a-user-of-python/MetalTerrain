@@ -36,30 +36,32 @@
 <h1>Chip Support</h1>
 <p class="lead">Which Apple chips support the M3-family GPU features:
 <strong>hardware ray tracing</strong> and <strong>mesh shading</strong>.</p>
+<div class="callout"><p><strong>iOS only for now.</strong> MetalTerrain targets iPhone and iPad —
+there is no Mac build yet, so the Mac column is for reference only.</p></div>
 <div class="callout"><p>The library never guesses from the device name — it queries
-<code>device.supportsRayTracing</code> and <code>device.supportsFamily(.apple9)</code> at runtime
+<code>device.supportsFamily(.apple9)</code> at runtime
 via <code>MTCapabilities</code>. This table is the human-readable version of those checks.</p></div>
 
 <h2><span class="badge yes">YES</span> Hardware ray tracing + mesh shading</h2>
 <table>
-<thead><tr><th>Family</th><th>Chips</th><th>Found in</th></tr></thead>
+<thead><tr><th>Chip</th><th>iPad models</th><th>iPhone models</th></tr></thead>
 <tbody>
-<tr><td><strong>M3</strong></td><td>M3, M3 Pro, M3 Max, M3 Ultra</td><td>MacBook Air/Pro, iMac, Mac mini</td></tr>
-<tr><td><strong>M4</strong></td><td>M4, M4 Pro, M4 Max</td><td>MacBook Pro, iMac, Mac mini, Mac Studio, iPad Pro</td></tr>
-<tr><td><strong>M5</strong></td><td>M5 (and later)</td><td>Newer Macs and iPads</td></tr>
-<tr><td><strong>A17 Pro</strong></td><td>A17 Pro</td><td>iPhone 15 Pro / Pro Max, iPad mini (7th gen)</td></tr>
-<tr><td><strong>A18</strong></td><td>A18, A18 Pro</td><td>iPhone 16 / 16 Plus / 16 Pro / Pro Max</td></tr>
-<tr><td><strong>A19</strong></td><td>A19, A19 Pro (and later)</td><td>Newer iPhones</td></tr>
+<tr><td><strong>M4</strong></td><td>iPad Pro 11" (2024), iPad Pro 13" (2024)</td><td>—</td></tr>
+<tr><td><strong>M3</strong></td><td>iPad Air 11" (2025), iPad Air 13" (2025)</td><td>—</td></tr>
+<tr><td><strong>A17 Pro</strong></td><td>iPad mini (7th gen, 2024)</td><td>iPhone 15 Pro / Pro Max</td></tr>
+<tr><td><strong>A18 / A18 Pro</strong></td><td>—</td><td>iPhone 16 / 16 Plus / 16e / 16 Pro / Pro Max</td></tr>
+<tr><td><strong>A19 / A19 Pro</strong></td><td>—</td><td>iPhone 17 series</td></tr>
+<tr><td><strong>M5 and later</strong></td><td colspan="2">Future iPads</td></tr>
 </tbody>
 </table>
 
 <h2><span class="badge no">NO</span> Standard rendering only</h2>
 <table>
-<thead><tr><th>Family</th><th>Chips</th><th>Notes</th></tr></thead>
+<thead><tr><th>Chip</th><th>iPad models</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><strong>M1</strong></td><td>M1, M1 Pro, M1 Max, M1 Ultra</td><td>Runs the full standard path at 60 fps — just no RT/mesh features.</td></tr>
-<tr><td><strong>M2</strong></td><td>M2, M2 Pro, M2 Max, M2 Ultra</td><td>Same — excellent standard rendering, no HW ray tracing.</td></tr>
-<tr><td><strong>A16 and earlier</strong></td><td>A16, A15, A14, …</td><td>iPhone 14 and older.</td></tr>
+<tr><td><strong>M2</strong></td><td>iPad Pro 11" (2022), iPad Pro 12.9" (2022), iPad Air 11"/13" (2024)</td><td>Full standard path at 60 fps — just no RT/mesh features.</td></tr>
+<tr><td><strong>M1</strong></td><td>iPad Pro 11" (2021), iPad Pro 12.9" (2021), iPad Air (2022)</td><td>Same — excellent standard rendering.</td></tr>
+<tr><td><strong>A16 and earlier</strong></td><td>iPad (10th gen) and older</td><td>iPhone 14 and older.</td></tr>
 </tbody>
 </table>
 
