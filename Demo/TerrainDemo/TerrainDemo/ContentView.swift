@@ -40,7 +40,11 @@ struct ContentView: View {
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
                     moveInput: $moveInput,
-                    onRendererReady: { terrainRenderer = $0 }
+                    onRendererReady: { renderer in
+                        // Dispatch async: setting @State during updateUIView
+                        // triggers "modifying state during view update".
+                        DispatchQueue.main.async { terrainRenderer = renderer }
+                    }
                 )
                 .ignoresSafeArea()
 
