@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -94,6 +102,80 @@ terrainView.onFrame = { tv, dt in
 <li><a href="chip-support.html"><strong>Chip Support</strong></a> — which chips get hardware ray tracing and mesh shading.</li>
 <li><a href="examples.html"><strong>Examples</strong></a> — copy-paste snippets for common tasks.</li>
 </ul>
+
+
+<h2>How it works (the 60-second version)</h2>
+<p>A MetalTerrain world is a <strong>pure function of a seed</strong>. There is no stored
+map, no downloaded asset, no server. Given the same seed and config, every device computes
+the exact same mountains, rivers, and villages — down to the placement of every tree.
+This is what makes the worlds "infinite": the library only ever generates the small
+patch of world around the camera, and it can regenerate any patch identically on demand.</p>
+<pre><code>seed (UInt64)
+  └─▶ noise field ─┬─▶ heightmap (continents, mountains, rivers, beaches)
+                   ├─▶ biome lookup (height → color/material)
+                   └─▶ structure placement (seeded PRNG per chunk)
+  └─▶ chunk streaming ─▶ GPU meshes ─▶ Metal renderer ─▶ your screen</code></pre>
+<p>The pipeline has four stages, and the library owns all of them:</p>
+<ol>
+<li><strong>Sampling</strong> (<code>MTTerrainWorld</code>): layered Perlin noise is combined
+into a normalized height in <code>0…1</code>. Domain warping bends the noise so coastlines
+and rivers look natural instead of blobby.</li>
+<li><strong>Meshing</strong> (<code>MTMeshBuilder</code>): each chunk's height grid becomes
+triangles with computed normals and per-vertex biome colors. Border vertices get small
+vertical skirts so neighboring chunks never show gaps.</li>
+<li><strong>Streaming</strong> (<code>MTTerrainRenderer</code>): chunks are built on a
+background queue, nearest-first, and uploaded to GPU buffers. Chunks outside the view
+radius are evicted; a one-chunk safety ring is kept briefly so fast movement never
+reveals holes.</li>
+<li><strong>Shading</strong> (Metal shaders): per-biome lighting, procedural detail,
+analytic + optional ray-traced shadows, fog, water, and sky.</li>
+</ol>
+<div class="callout"><p><strong>Determinism is a feature, not an accident.</strong>
+<code>heightAt(x:z:)</code>, <code>generateChunk(at:)</code>, <code>structures(in:)</code>,
+and <code>biomeAt(height:)</code> are all pure functions of <code>(seed, config)</code>.
+This means minimaps, spawn logic, save files, and multiplayer reconciliation can all
+rely on the world being identical everywhere. See
+<a href="architecture.html">Architecture</a> for the full picture.</p></div>
+
+<h2>Who MetalTerrain is for</h2>
+<ul>
+<li><strong>Game prototypes</strong> — drop in an explorable 3D world in an afternoon;
+spend your time on gameplay, not terrain tooling.</li>
+<li><strong>Tech demos &amp; benchmarks</strong> — a demanding but well-behaved Metal
+workload with a built-in FPS readout.</li>
+<li><strong>Education</strong> — a complete, readable example of procedural generation,
+chunked LOD, and Metal rendering in Swift.</li>
+<li><strong>Ambient / toy apps</strong> — endless flyover screensavers, terrain
+wallpapers, world-explorer toys.</li>
+</ul>
+
+<h2>What MetalTerrain is <em>not</em></h2>
+<ul>
+<li>Not a game engine — there is no physics, no character controller, no collision
+beyond the height query you call yourself (<code>world.heightAt(x:z:)</code>).</li>
+<li>Not an editor — worlds are generated, not painted. You tune them with seeds,
+noise parameters, and biome bands.</li>
+<li>Not cross-platform — Apple platforms only (iOS 17+, macOS 14+ for the curious;
+the library is iOS-first).</li>
+</ul>
+
+<h2>Library vs. app responsibilities</h2>
+<p>This split is the most important thing to understand before you write code:</p>
+<table>
+<thead><tr><th>Library owns (don't reimplement)</th><th>App owns (your job)</th></tr></thead>
+<tbody>
+<tr><td>Heightfield math, noise, biomes</td><td>Camera: position, look direction, FOV</td></tr>
+<tr><td>Chunk streaming, LOD, eviction</td><td>Input: touch, joystick, gestures</td></tr>
+<tr><td>Mesh building, normals, skirts</td><td>Gameplay: player, physics, objectives</td></tr>
+<tr><td>Pipelines, shaders, shadow maps</td><td>UI: HUD, menus, settings screens</td></tr>
+<tr><td>Structure placement &amp; instancing</td><td>Overlays: custom draws via the overlay closure</td></tr>
+<tr><td>Water plane, skybox, fog</td><td>Persistence: which seed the player chose</td></tr>
+</tbody>
+</table>
+<p>If you find yourself writing Metal boilerplate, stop — the library probably already
+does it. If you find yourself fighting the library for camera control, you're holding
+it wrong: the library never moves the camera. See
+<a href="guide-camera.html">Camera &amp; Input</a>.</p>
 
   </main>
 </div>

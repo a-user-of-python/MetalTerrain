@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -81,6 +89,66 @@ renderer.skybox?.sunElevation = elevationDeg * .pi / 180
 <ul>
 <li><a href="api.html#mtskybox">MTSkybox</a> in the API reference.</li>
 <li><a href="guide-raytracing.html">Ray Tracing</a> — shadows traced toward this sun.</li>
+</ul>
+
+
+<h2>How it's drawn</h2>
+<p>The skybox is <strong>one fullscreen triangle</strong> rendered first each frame, at
+the far plane, with depth writes disabled. Everything else (terrain, structures, water)
+draws over it with normal depth testing. The gradient, sun disc, and stars are all
+procedural in <code>sky_fragment</code> — no textures.</p>
+<ul>
+<li><strong>Day</strong> (<code>sunElevation &gt; 0</code>): horizon-to-zenith gradient
+with warm tint near the sun disc.</li>
+<li><strong>Golden hour</strong> (<code>sunElevation ≈ 0</code>): strong warm band at
+the horizon.</li>
+<li><strong>Night</strong> (<code>sunElevation &lt; 0</code>): sun hidden, stars fade in.</li>
+</ul>
+<div class="callout"><p><strong>Sun agreement invariant:</strong> the skybox uses the
+<em>same</em> azimuth/elevation → direction mapping as the terrain lighting, so the
+visible sun disc always agrees with the light direction shading the terrain. If you
+move the sun, both move together — the renderer mirrors its
+<code>sunAzimuth</code>/<code>sunElevation</code> into the skybox automatically before
+each draw.</p></div>
+
+<h2>API</h2>
+<pre><code class="language-swift">// The renderer creates one by default; nil disables the sky.
+renderer.skybox = nil            // no sky (clear color shows through)
+renderer.skybox = MTSkybox(device: device)  // re-enable
+
+// Sun position in degrees — mirrors renderer.sunAzimuth/sunElevation.
+renderer.sunAzimuth = 135        // 0° = +Z, 90° = +X
+renderer.sunElevation = 12       // low sun → long shadows, warm sky
+renderer.sunElevation = -10      // night: stars, sun below horizon
+
+// Via the view (forwarded):
+terrainView.sunAzimuth = 135
+terrainView.sunElevation = 12
+</code></pre>
+<h2>Day/night cycle example</h2>
+<pre><code class="language-swift">// 60-second day cycle driven from onFrame
+var timeOfDay: Float = 0.25  // 0 = midnight, 0.5 = noon
+terrainView.onFrame = { view, dt in
+    timeOfDay += Float(dt) / 60.0
+    if timeOfDay &gt;= 1 { timeOfDay -= 1 }
+    // Elevation: -30° (midnight) .. +65° (noon)
+    view.sunElevation = sin((timeOfDay - 0.25) * 2 * .pi) * 47.5 + 17.5
+    // Azimuth sweeps east → west
+    view.sunAzimuth = timeOfDay * 360
+    // ... camera code ...
+}
+</code></pre>
+<h2>Customization notes</h2>
+<ul>
+<li>There is no texture or gradient-stop API — the sky is fully procedural. To change
+the look (alien sky, different star density), you'd modify <code>sky_fragment</code>
+in the Metal sources; the mapping uniforms are the documented seam.</li>
+<li>Fog color (<code>config.fogColor</code>) should roughly match your horizon color or
+distant terrain will visibly pop against the sky. The defaults are tuned to agree.</li>
+<li><code>MTSkybox.draw(encoder:viewProjection:)</code> sets its own pipeline, depth
+state (<code>.lessEqual</code>, no depth write), and cull mode (<code>.none</code>).
+If you call it manually in a custom renderer integration, re-set your terrain state
+afterward — the library renderer does this automatically.</li>
 </ul>
 
   </main>

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera &amp; Input — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain camera integration: the contract, orbit and walk rigs, input, and collision.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Camera &amp; Input</h1>
+<p class="lead">The library never moves the camera — that's your app's job, and it's
+where <em>feel</em> lives. This guide covers the integration contract, the standard
+camera rigs, and the pitfalls that put cameras inside mountains.</p>
+
+<h2>The contract</h2>
+<ul>
+<li><strong>You call <code>setCamera</code> every frame</strong> (from
+<code>onFrame</code> or your own <code>MTKViewDelegate</code>). No call → the previous
+frame's camera persists; never called → black screen.</li>
+<li><strong>Signature (view):</strong>
+<code>setCamera(position:target:fovDegrees:aspect:near:far:)</code> with defaults
+<code>fovDegrees = 55, near = 1, far = 4000</code>. The renderer's version takes all
+six parameters (no defaults).</li>
+<li><strong><code>setCamera</code> also drives streaming</strong> — the view calls
+<code>renderer.update(cameraTarget:)</code> internally with the target's XZ. With the
+raw renderer, you must call <code>update(cameraTarget:)</code> yourself every frame.</li>
+<li><strong><code>onFrame</code> runs on the render thread.</strong> Safe: camera math,
+<code>setCamera</code>, reading <code>renderer</code>. Unsafe: touching UIKit/SwiftUI
+state — shuttle values through your coordinator on the main thread.</li>
+<li><strong>Always pass the real aspect.</strong>
+<code>Float(view.bounds.width / max(1, view.bounds.height))</code>, recomputed on
+rotation. A stale aspect stretches the world.</li>
+</ul>
+
+<h2>Orbit camera (third-person / map view)</h2>
+<pre><code class="language-swift">struct OrbitCamera {
+    var target = SIMD3&lt;Float&gt;(0, 100, 0)
+    var yaw: Float = 0.8, pitch: Float = -0.45, distance: Float = 1400
+
+    mutating func apply(to view: MTTerrainView) {
+        // Clamp pitch so you can&#x27;t go fully under the world:
+        pitch = max(-1.45, min(-0.05, pitch))
+        distance = max(50, min(6000, distance))
+        let eye = SIMD3&lt;Float&gt;(
+            target.x + distance * cos(pitch) * sin(yaw),
+            target.y + distance * sin(pitch),
+            target.z + distance * cos(pitch) * cos(yaw))
+        let aspect = Float(view.bounds.width / max(1, view.bounds.height))
+        view.setCamera(position: eye, target: target, aspect: aspect)
+    }
+}
+// Input mapping: one-finger drag → yaw/pitch, pinch → distance,
+// two-finger drag → pan target (clamped to ±8000 world units).
+</code></pre>
+<h2>Walk camera (first-person)</h2>
+<p>The walk camera has one job the orbit camera doesn't: <strong>never go under the
+terrain.</strong> Sample the heightfield:</p>
+<pre><code class="language-swift">struct WalkCamera {
+    var pos = SIMD2&lt;Float&gt;(0, 0)   // XZ position
+    var yaw: Float = 0
+    var pitch: Float = -0.08
+    let eyeHeight: Float = 2      // player size
+
+    mutating func apply(to view: MTTerrainView, world: MTTerrainWorld,
+                        moveInput: SIMD2&lt;Float&gt;, dt: Float) {
+        // Move on XZ; block water with axis slide (see Examples).
+        let speed: Float = 45
+        let forward = SIMD2&lt;Float&gt;(sin(yaw), cos(yaw))
+        let right = SIMD2&lt;Float&gt;(-forward.y, forward.x)
+        let delta = (forward * moveInput.y + right * moveInput.x) * speed * dt
+        let tryPos = pos + delta
+        if world.heightAt(x: Double(tryPos.x), z: Double(tryPos.y))
+             &gt;= world.config.seaLevel {
+            pos = tryPos
+        }
+        // Eye: sample HERE and AHEAD — hills ahead are higher than your feet.
+        let groundY = world.worldY(forHeight:
+            world.heightAt(x: Double(pos.x), z: Double(pos.y)))
+        let ahead = pos + forward * 8
+        let aheadY = world.worldY(forHeight:
+            world.heightAt(x: Double(ahead.x), z: Double(ahead.y)))
+        let eye = SIMD3&lt;Float&gt;(pos.x, max(groundY, aheadY) + eyeHeight, pos.y)
+        let cp = cos(pitch)
+        let look = eye + SIMD3&lt;Float&gt;(sin(yaw) * cp, sin(pitch),
+                                      cos(yaw) * cp) * 10
+        let aspect = Float(view.bounds.width / max(1, view.bounds.height))
+        view.setCamera(position: eye, target: look, aspect: aspect)
+    }
+}
+</code></pre>
+<div class="callout"><p><strong>The ahead-sample is not optional.</strong> Sampling
+only at the player's feet puts the camera inside uphill terrain — the classic "camera
+glitches under the map when walking up hills" bug. Eight units ahead at 45 u/s gives
+~0.18 s of lookahead: enough to ride up slopes smoothly without floating.</p></div>
+
+<h2>Frame-rate-independent movement</h2>
+<ul>
+<li>Use the <code>dt</code> from <code>onFrame</code> (<code>TimeInterval</code>).
+Clamp it: <code>let dt = min(frameDt, 0.1)</code> — a backgrounded app returning with
+<code>dt = 30</code> shouldn't teleport the player.</li>
+<li><strong>Throttle interactive controls during the interaction.</strong> Sun sliders
+and noise sliders must update uniforms per frame (cheap) without triggering rebuilds
+(expensive). Coalesce: apply the <em>value</em> continuously, apply the
+<em>consequences</em> on release.</li>
+<li>Keep <code>onFrame</code> to camera math + input integration. Game logic,
+networking, and UI sync belong on the main thread.</li>
+</ul>
+
+<h2>Collision with terrain (beyond walking)</h2>
+<p>The library gives you one collision primitive — the heightfield — and it's enough
+for most gameplay:</p>
+<pre><code class="language-swift">// Keep any object above ground:
+func groundClamp(_ p: inout SIMD3&lt;Float&gt;, world: MTTerrainWorld,
+                 clearance: Float) {
+    let h = world.heightAt(x: Double(p.x), z: Double(p.z))
+    p.y = max(p.y, world.worldY(forHeight: h) + clearance)
+}
+
+// Raycast-ish: march a ray until it goes under the terrain (for tap-to-move):
+func pickGround(from eye: SIMD3&lt;Float&gt;, dir: SIMD3&lt;Float&gt;,
+                world: MTTerrainWorld) -&gt; SIMD3&lt;Float&gt;? {
+    var t: Float = 0
+    for _ in 0..&lt;200 {
+        let p = eye + dir * t
+        let h = world.heightAt(x: Double(p.x), z: Double(p.z))
+        if p.y &lt;= world.worldY(forHeight: h) { return p }
+        t += max(2, (p.y - world.worldY(forHeight: h)) * 0.5)
+    }
+    return nil
+}
+</code></pre>
+<h2>Common camera bugs</h2>
+<table>
+<thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td>Black screen, FPS runs</td><td><code>setCamera</code> never called</td>
+<td>Call it every frame from <code>onFrame</code>.</td></tr>
+<tr><td>Camera inside mountains</td><td>Eye below terrain</td>
+<td>Heightfield-sample the eye (walk snippet).</td></tr>
+<tr><td>Clipping through uphill slopes</td><td>Only sampling at feet</td>
+<td>Sample 8 units ahead, take the max.</td></tr>
+<tr><td>Stretched/squashed world</td><td>Wrong aspect</td>
+<td>Recompute from bounds every frame.</td></tr>
+<tr><td>Swimming at the horizon</td><td>Far plane too close or camera too far</td>
+<td><code>far = 4000</code> default is tuned for viewDistance ≤ 10.</td></tr>
+<tr><td>Jitter when rotating device</td><td>Aspect not updated on rotation</td>
+<td>Read bounds in <code>onFrame</code>, not once in <code>viewDidLoad</code>.</td></tr>
+</tbody>
+</table>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

@@ -18,50 +18,56 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
 <h1>Chip Support</h1>
 <p class="lead">Which Apple chips support the M3-family GPU features:
 <strong>hardware ray tracing</strong> and <strong>mesh shading</strong>.</p>
-<div class="callout"><p><strong>iOS only for now.</strong> MetalTerrain targets iPhone and iPad —
-there is no Mac build yet, so the Mac column is for reference only.</p></div>
 <div class="callout"><p>The library never guesses from the device name — it queries
-<code>device.supportsFamily(.apple9)</code> at runtime
+<code>device.supportsRayTracing</code> and <code>device.supportsFamily(.apple9)</code> at runtime
 via <code>MTCapabilities</code>. This table is the human-readable version of those checks.</p></div>
 
 <h2><span class="badge yes">YES</span> Hardware ray tracing + mesh shading</h2>
 <table>
-<thead><tr><th>Chip</th><th>iPad models</th><th>iPhone models</th></tr></thead>
+<thead><tr><th>Family</th><th>Chips</th><th>Found in</th></tr></thead>
 <tbody>
-<tr><td><strong>M4</strong></td><td>iPad Pro 11" (2024), iPad Pro 13" (2024)</td><td>—</td></tr>
-<tr><td><strong>M3</strong></td><td>iPad Air 11" (2025), iPad Air 13" (2025)</td><td>—</td></tr>
-<tr><td><strong>A17 Pro</strong></td><td>iPad mini (7th gen, 2024)</td><td>iPhone 15 Pro / Pro Max</td></tr>
-<tr><td><strong>A18 / A18 Pro</strong></td><td>—</td><td>iPhone 16 / 16 Plus / 16e / 16 Pro / Pro Max</td></tr>
-<tr><td><strong>A19 / A19 Pro</strong></td><td>—</td><td>iPhone 17 series</td></tr>
-<tr><td><strong>M5 and later</strong></td><td colspan="2">Future iPads</td></tr>
+<tr><td><strong>M3</strong></td><td>M3, M3 Pro, M3 Max, M3 Ultra</td><td>MacBook Air/Pro, iMac, Mac mini</td></tr>
+<tr><td><strong>M4</strong></td><td>M4, M4 Pro, M4 Max</td><td>MacBook Pro, iMac, Mac mini, Mac Studio, iPad Pro</td></tr>
+<tr><td><strong>M5</strong></td><td>M5 (and later)</td><td>Newer Macs and iPads</td></tr>
+<tr><td><strong>A17 Pro</strong></td><td>A17 Pro</td><td>iPhone 15 Pro / Pro Max, iPad mini (7th gen)</td></tr>
+<tr><td><strong>A18</strong></td><td>A18, A18 Pro</td><td>iPhone 16 / 16 Plus / 16 Pro / Pro Max</td></tr>
+<tr><td><strong>A19</strong></td><td>A19, A19 Pro (and later)</td><td>Newer iPhones</td></tr>
 </tbody>
 </table>
 
 <h2><span class="badge no">NO</span> Standard rendering only</h2>
 <table>
-<thead><tr><th>Chip</th><th>iPad models</th><th>Notes</th></tr></thead>
+<thead><tr><th>Family</th><th>Chips</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><strong>M2</strong></td><td>iPad Pro 11" (2022), iPad Pro 12.9" (2022), iPad Air 11"/13" (2024)</td><td>Full standard path at 60 fps — just no RT/mesh features.</td></tr>
-<tr><td><strong>M1</strong></td><td>iPad Pro 11" (2021), iPad Pro 12.9" (2021), iPad Air (2022)</td><td>Same — excellent standard rendering.</td></tr>
-<tr><td><strong>A16 and earlier</strong></td><td>iPad (10th gen) and older</td><td>iPhone 14 and older.</td></tr>
+<tr><td><strong>M1</strong></td><td>M1, M1 Pro, M1 Max, M1 Ultra</td><td>Runs the full standard path at 60 fps — just no RT/mesh features.</td></tr>
+<tr><td><strong>M2</strong></td><td>M2, M2 Pro, M2 Max, M2 Ultra</td><td>Same — excellent standard rendering, no HW ray tracing.</td></tr>
+<tr><td><strong>A16 and earlier</strong></td><td>A16, A15, A14, …</td><td>iPhone 14 and older.</td></tr>
 </tbody>
 </table>
 
@@ -85,6 +91,70 @@ let mesh = MTCapabilities.supportsMeshShading(device: device)
 if rt &amp;&amp; mesh {
     // M3-family GPU: enable your M3-only UI, quality options, etc.
 }</code></pre>
+
+
+<h2>How to query at runtime</h2>
+<p>Both queries are pure — they never change device state — so call them once at
+startup and cache the result:</p>
+<pre><code class="language-swift">import MetalTerrain
+
+let device = MTLCreateSystemDefaultDevice()!
+let canRayTrace  = MTCapabilities.supportsHardwareRayTracing(device: device)
+let canMeshShade = MTCapabilities.supportsMeshShading(device: device)
+
+// Typical usage: gate an &quot;Enhanced graphics&quot; toggle
+enhancedToggle.isHidden = !(canRayTrace || canMeshShade)
+</code></pre>
+<div class="callout"><p><strong>Two gates, not one.</strong> Hardware support (these
+queries) is necessary but not sufficient: the <code>M3_FEATURES</code> Swift/Metal
+build flag must also be set, or the ray-tracing and mesh-shading code paths aren't
+compiled in at all. Ship two binaries (standard + M3-enhanced) or one M3_FEATURES
+binary that gracefully degrades — the renderer falls back automatically either way.</p></div>
+
+<h2>Full matrix</h2>
+<table>
+<thead><tr><th>Chip</th><th>Devices</th><th>Ray tracing</th><th>Mesh shading</th><th>Metal 4</th></tr></thead>
+<tbody>
+<tr><td>M5</td><td>iPad Pro (2025+)</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>M4</td><td>iPad Pro 11"/13" (2024), Mac</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>M3</td><td>iPad Air 11"/13" (2025), Mac</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>M2</td><td>iPad Pro/Air, Mac</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>M1</td><td>iPad Pro/Air, Mac</td><td>❌</td><td>❌</td><td>✅</td></tr>
+<tr><td>A19 / A19 Pro</td><td>iPhone 17 series</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>A18 / A18 Pro</td><td>iPhone 16 series</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>A17 Pro</td><td>iPhone 15 Pro/Max, iPad mini (7th gen)</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>A16 and earlier</td><td>older iPhones/iPads</td><td>❌</td><td>❌</td><td>❌</td></tr>
+</tbody>
+</table>
+<p>Metal 4 fast paths engage on iOS 26+ on Apple Silicon; the renderer probes for them
+at startup (<code>usesMetal4</code> reports the outcome) and falls back to Metal 3
+silently on any failure.</p>
+
+<h2>What "unsupported" actually means</h2>
+<p>Nothing breaks. On an M1 iPad or an A16 iPhone, with or without the
+<code>M3_FEATURES</code> flag, you get:</p>
+<ul>
+<li>The full terrain, water, skybox, structures, fog, and wireframe.</li>
+<li>Analytic sun shadows (the standard shadow path — the ray-traced shadows are a
+<em>subtle enhancement</em>, not a replacement).</li>
+<li>The standard vertex-shader mesh path (pixel-identical to the mesh-shader path).</li>
+<li>Procedural 3D detail via the vertex shader (<code>detailAmount</code> works
+everywhere).</li>
+</ul>
+<p>The M3 extras are strictly additive. Never gate <em>gameplay</em> on them.</p>
+
+<h2>Build configurations</h2>
+<p>The recommended shipping setup is two IPA/binary variants from one codebase:</p>
+<ul>
+<li><strong>Standard</strong>: no <code>M3_FEATURES</code>. Runs everywhere iOS 17+
+runs. Smallest binary.</li>
+<li><strong>Enhanced</strong>: <code>M3_FEATURES</code> set for Swift <em>and</em>
+Metal. On M3+/A17 Pro+ hardware it lights up ray-traced shadows and mesh shading
+automatically; on older hardware it behaves exactly like the standard build.</li>
+</ul>
+<p>Because the renderer probes capabilities at runtime, the enhanced binary is safe to
+install on old devices — it just won't use the extras. The only reason to ship the
+standard binary is size, or caution.</p>
 
   </main>
 </div>

@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -114,6 +122,119 @@ tells you nothing useful about GPU performance):</p>
 <li><code>aspect</code> updated on rotation.</li>
 <li>Seed + config versioned together if persisted/shared.</li>
 </ul>
+
+
+<div class="callout"><p><strong>Defaults changed.</strong> The numbers below use the
+current defaults: <code>chunkResolution</code> 250, <code>chunkWorldSize</code> 1000,
+<code>viewDistance</code> 6, <code>heightScale</code> 400. Older versions of this page
+quoted 64/128 — those were stale.</p></div>
+
+<h2>Chunk budget math (corrected)</h2>
+<p><code>viewDistance</code> is a chunk <em>radius</em>. Live chunks =
+<code>(2 × viewDistance + 1)²</code>.</p>
+<table>
+<thead><tr><th>viewDistance</th><th>Chunks</th><th>Horizon</th></tr></thead>
+<tbody>
+<tr><td>4</td><td>81</td><td>~4,000 units</td></tr>
+<tr><td>6 (default)</td><td>169</td><td>~6,000 units</td></tr>
+<tr><td>8</td><td>289</td><td>~8,000 units</td></tr>
+<tr><td>10 (max)</td><td>441</td><td>~10,000 units</td></tr>
+</tbody>
+</table>
+<p>Each full-resolution chunk is a 250×250 grid → <code>249 × 249 × 2 = 124,002</code>
+triangles. At viewDistance 6 that's <strong>~21M triangles worst case</strong> — before
+frustum culling removes off-screen chunks and LOD halves distant ones. In practice the
+GPU sees a fraction of that, but the number explains why the two dials below matter.</p>
+<h3>The two dials</h3>
+<ul>
+<li><strong><code>viewDistance</code></strong> — how much world is visible. Cost scales
+with the <em>square</em>. Turn this down first.</li>
+<li><strong><code>chunkResolution</code></strong> — detail per chunk. Turn down second.
+Halving resolution quarters the triangle count <em>and</em> quarters the noise
+evaluations per chunk build.</li>
+</ul>
+
+<h2>Where the frame time goes</h2>
+<table>
+<thead><tr><th>Stage</th><th>Thread</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Chunk mesh building (noise → heights → mesh)</td><td>Background queue</td>
+<td>Doesn't block rendering. Nearest-first ordering. ~2M noise evals per full-res chunk.</td></tr>
+<tr><td>Buffer upload (CPU → GPU)</td><td>Background queue</td>
+<td><code>MTLBuffer</code> creation is thread-safe; done off the render thread.</td></tr>
+<tr><td>Frustum culling + draw submission</td><td>Render thread</td>
+<td>One draw call per visible chunk; AABB-tested against the view frustum.</td></tr>
+<tr><td>Vertex/fragment shading</td><td>GPU</td>
+<td>Per-pixel bump mapping and specular are the main fragment costs.</td></tr>
+<tr><td>TLAS refresh (M3_FEATURES only)</td><td>Render thread</td>
+<td>Throttled to every 15 frames; skipped when the chunk set is unchanged.</td></tr>
+</tbody>
+</table>
+
+<h2>Memory estimates</h2>
+<p>Per chunk (full resolution, 250×250):</p>
+<ul>
+<li>Heights: 62,500 × 4 bytes = <strong>244 KB</strong></li>
+<li>Vertices: 62,500 × 48 bytes = <strong>2.9 MB</strong></li>
+<li>Indices: 124,002 × 3 × 4 bytes ≈ <strong>1.5 MB</strong></li>
+<li><strong>Total ≈ 4.6 MB per chunk</strong> on the GPU.</li>
+</ul>
+<p>At viewDistance 6 (169 chunks) that's ~780 MB worst case — but the LRU cache caps at
+<code>min((2×(radius+1)+1)², 300)</code> chunks, and frustum culling means most cached
+chunks aren't drawn. If memory pressure is a concern, lower <code>viewDistance</code>
+before anything else: it reduces chunk count quadratically.</p>
+
+<h2>LOD behavior</h2>
+<p>Chunks beyond 40% of the view distance generate at half resolution
+(<code>resolutionScale: 0.5</code> → 4× fewer noise evaluations and 4× fewer triangles).
+<code>MTMeshBuilder.buildLOD(for:world:distanceFactor:)</code> selects the stride;
+<code>distanceFactor</code> is <code>dist / (viewDistance × chunkWorldSize)</code>.</p>
+<div class="callout"><p><strong>Current status:</strong> LOD is temporarily disabled
+(all chunks build at full resolution) while border stitching is implemented, to avoid
+T-junction cracks between LOD levels. The 5× chunk-build speedup keeps this fast enough
+on current hardware. This page will be updated when LOD returns.</p></div>
+
+<h2>Per-device settings</h2>
+<table>
+<thead><tr><th>Device class</th><th>viewDistance</th><th>chunkResolution</th><th>detailAmount</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>M3/M4/M5 iPad, A17 Pro+ iPhone</td><td>6–8</td><td>250</td><td>1.0</td><td>Full quality; ray tracing + mesh shading if M3_FEATURES build</td></tr>
+<tr><td>M1/M2 iPad, A15/A16 iPhone</td><td>5–6</td><td>192</td><td>0.7</td><td>Comfortable 60 fps</td></tr>
+<tr><td>A12–A14 iPhone/iPad</td><td>4–5</td><td>128</td><td>0.3</td><td>Reduce viewDistance first</td></tr>
+<tr><td>Simulator (any Mac)</td><td>—</td><td>—</td><td>—</td><td>Don't benchmark here; Metal runs on CPU</td></tr>
+</tbody>
+</table>
+
+<h2>Interactive controls must stay at 60 fps</h2>
+<p>A standing rule in this library's development: <strong>every interactive control gets
+throttled or coalesced and perf-checked <em>during</em> the interaction, not just at
+rest.</strong> If you expose sun sliders, noise sliders, or a regenerate button:</p>
+<ul>
+<li><strong>Debounce expensive actions.</strong> The Regenerate button uses a 1.5 s
+debounce; rapid taps don't queue hundreds of stale builds.</li>
+<li><strong>Generation-stamp queued work.</strong> Chunk builds capture a
+<code>buildGeneration</code> counter at dispatch; if the config changed while queued,
+the work is dropped before doing anything expensive.</li>
+<li><strong>Coalesce slider drags.</strong> A sun-angle slider should update uniforms
+every frame (cheap) but must not trigger pipeline recompiles or chunk rebuilds.</li>
+<li><strong>Profile while dragging.</strong> The sun-slider throttle was verified by
+watching FPS <em>during</em> adjustment ("never below 60 even when adjusting").</li>
+</ul>
+
+<h2>Profiling checklist</h2>
+<ol>
+<li><strong>Always profile on a physical device.</strong> Simulator numbers are meaningless.</li>
+<li>Use Xcode's Metal debugger (capture a frame) to see actual draw call counts and
+timings per encoder.</li>
+<li>Watch <code>renderer.currentFPS</code> / <code>terrainView.fps</code> — the
+exponential moving average smooths spikes; for hitch-hunting, instrument
+<code>onFrame</code> with your own min-frame-time tracker.</li>
+<li>Suspect chunk streaming if hitches correlate with movement; suspect the TLAS if
+they correlate with chunk-set changes on M3 builds; suspect fragment cost if FPS is
+uniformly low while stationary (try <code>detailAmount = 0</code> as a bisect).</li>
+<li>Check thermal state — sustained 60 fps on a hot iPad throttles the GPU. That's the
+device protecting itself, not a bug.</li>
+</ol>
 
   </main>
 </div>

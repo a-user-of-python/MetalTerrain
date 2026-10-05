@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -151,6 +159,158 @@ enhancedToggle.isHidden = !MTCapabilities.supportsHardwareRayTracing(device: dev
 
 // The renderer already enables RT + mesh shading automatically when built
 // with M3_FEATURES on a supported device — nothing else to wire up.</code></pre>
+
+
+<h2>Full app skeleton (UIKit)</h2>
+<p>The canonical 60-line integration — view, world, camera, sun slider:</p>
+<pre><code class="language-swift">import UIKit
+import MetalTerrain
+
+final class TerrainViewController: UIViewController {
+    var terrainView: MTTerrainView!
+    var world: MTTerrainWorld!
+    // Camera state
+    var yaw: Float = 0.8, pitch: Float = -0.45, distance: Float = 1400
+    var target = SIMD3&lt;Float&gt;(0, 120, 0)
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        world = MTTerrainWorld(seed: 20261005)
+        terrainView = MTTerrainView(frame: view.bounds)
+        terrainView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        terrainView.world = world
+        // Spawn looking at land, not ocean:
+        let s = world.findSafeSpawn()
+        target = SIMD3&lt;Float&gt;(s.x, world.worldY(
+            forHeight: world.heightAt(x: Double(s.x), z: Double(s.y))), s.y)
+        terrainView.onFrame = { [weak self] view, dt in
+            self?.updateCamera(view: view, dt: dt)
+        }
+        view.addSubview(terrainView)
+    }
+
+    func updateCamera(view: MTTerrainView, dt: TimeInterval) {
+        let eye = SIMD3&lt;Float&gt;(
+            target.x + distance * cos(pitch) * sin(yaw),
+            target.y + distance * sin(pitch),
+            target.z + distance * cos(pitch) * cos(yaw))
+        let aspect = Float(view.bounds.width / max(1, view.bounds.height))
+        view.setCamera(position: eye, target: target, aspect: aspect)
+    }
+}
+</code></pre>
+<h2>Walk-mode player controller</h2>
+<pre><code class="language-swift">// Joystick input in [-1, 1]²; call from onFrame.
+func updatePlayer(view: MTTerrainView, world: MTTerrainWorld,
+                  pos: inout SIMD2&lt;Float&gt;, yaw: inout Float,
+                  moveInput: SIMD2&lt;Float&gt;, dt: Float) {
+    let speed: Float = 45  // world units/sec at full tilt
+    let forward = SIMD2&lt;Float&gt;(sin(yaw), cos(yaw))
+    let right = SIMD2&lt;Float&gt;(-forward.y, forward.x)
+    var delta = (forward * moveInput.y + right * moveInput.x) * speed * dt
+
+    // Water blocking: don&#x27;t walk into the ocean (slide along the shore).
+    func landAt(_ p: SIMD2&lt;Float&gt;) -&gt; Bool {
+        world.heightAt(x: Double(p.x), z: Double(p.y)) &gt;= world.config.seaLevel
+    }
+    let tryPos = pos + delta
+    if landAt(tryPos) { pos = tryPos }
+    else if landAt(SIMD2(pos.x + delta.x, pos.y)) { pos.x += delta.x }
+    else if landAt(SIMD2(pos.x, pos.y + delta.y)) { pos.y += delta.y }
+
+    // Eye follows terrain; sample ahead so hills don&#x27;t swallow the camera.
+    let ground = world.worldY(forHeight: world.heightAt(x: Double(pos.x),
+                                                        z: Double(pos.y)))
+    let ahead = pos + forward * 8
+    let aheadY = world.worldY(forHeight: world.heightAt(x: Double(ahead.x),
+                                                         z: Double(ahead.y)))
+    let eye = SIMD3&lt;Float&gt;(pos.x, max(ground, aheadY) + 2, pos.y)
+    let look = eye + SIMD3&lt;Float&gt;(forward.x, -0.08, forward.y) * 10
+    let aspect = Float(view.bounds.width / max(1, view.bounds.height))
+    view.setCamera(position: eye, target: look, aspect: aspect)
+}
+</code></pre>
+<h2>Custom overlay draw (car, markers, gizmos)</h2>
+<p>Draw app objects <strong>in the same render pass</strong> via the overlay closure —
+no second pass, no synchronization bugs:</p>
+<pre><code class="language-swift">// With MTTerrainRenderer directly:
+renderer.draw(in: mtkView) { encoder in
+    // encoder is the live MTLRenderCommandEncoder, after terrain+water.
+    encoder.setRenderPipelineState(myCarPipeline)
+    encoder.setVertexBuffer(carVertexBuffer, offset: 0, index: 0)
+    // ... set uniforms, then:
+    encoder.drawIndexedPrimitives(type: .triangle, indexCount: carIndexCount,
+                                  indexType: .uint32, indexBuffer: carIndexBuffer,
+                                  indexBufferOffset: 0)
+}
+// NOTE: MTTerrainView does not expose the overlay parameter — use
+// MTTerrainRenderer with your own MTKView when you need custom draws.
+</code></pre>
+<h2>Regenerate button (debounced)</h2>
+<pre><code class="language-swift">// Coalesce rapid taps: stale builds are dropped via buildGeneration,
+// but don&#x27;t queue hundreds of them in the first place.
+var lastRegen = Date.distantPast
+@IBAction func regenerateTapped() {
+    guard Date().timeIntervalSince(lastRegen) &gt; 1.5 else { return }
+    lastRegen = Date()
+    world.seed = UInt64.random(in: 1...999_999)
+    // configVersion is unchanged by seed... force a stream refresh:
+    world.config = world.config  // bumps configVersion → renderer rebuilds
+    let s = world.findSafeSpawn()
+    target = SIMD3&lt;Float&gt;(s.x, 0, s.y)
+}
+</code></pre>
+<h2>Quality settings screen</h2>
+<pre><code class="language-swift">func applyQuality(_ q: Quality, view: MTTerrainView) {
+    switch q {
+    case .low:
+        view.viewDistance = 4
+        view.renderer?.detailAmount = 0.3
+        view.showsWater = true
+    case .medium:
+        view.viewDistance = 6
+        view.renderer?.detailAmount = 0.7
+    case .high:
+        view.viewDistance = 8
+        view.renderer?.detailAmount = 1.0
+    }
+    // viewDistance writes through to world.config → streaming rebuilds.
+}
+// Changing viewDistance at runtime is safe: the renderer evicts out-of-range
+// chunks and streams the new ring nearest-first.
+</code></pre>
+<h2>Procedural minimap</h2>
+<p>Because generation is deterministic, a minimap is just sampling:</p>
+<pre><code class="language-swift">func renderMinimap(world: MTTerrainWorld, center: MTChunkCoord,
+                   radius: Int, pixelsPerChunk: Int) -&gt; UIImage {
+    let size = (radius * 2 + 1) * pixelsPerChunk
+    let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
+    return renderer.image { ctx in
+        for cz in -radius...radius {
+            for cx in -radius...radius {
+                let chunk = world.generateChunk(
+                    at: MTChunkCoord(x: center.x + cx, z: center.z + cz),
+                    resolutionScale: 0.25)  // cheap preview resolution
+                for iz in 0..&lt;chunk.resolution {
+                    for ix in 0..&lt;chunk.resolution {
+                        let h = chunk.height(ix: ix, iz: iz)
+                        let b = world.biomeAt(height: h)
+                        let c = b.groundColor
+                        ctx.cgContext.setFillColor(
+                            red: CGFloat(c.x), green: CGFloat(c.y),
+                            blue: CGFloat(c.z), alpha: 1)
+                        let px = (cx + radius) * pixelsPerChunk
+                               + ix * pixelsPerChunk / chunk.resolution
+                        let py = (cz + radius) * pixelsPerChunk
+                               + iz * pixelsPerChunk / chunk.resolution
+                        ctx.cgContext.fill(CGRect(x: px, y: py, width: 2, height: 2))
+                    }
+                }
+            }
+        }
+    }
+}
+</code></pre>
 
   </main>
 </div>

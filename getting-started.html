@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -168,6 +176,141 @@ defaults are tuned to each other. See <a href="guide-noise.html">Noise Tuning</a
 <li><a href="guide-performance.html">Performance</a> — chunk budgets, per-device settings.</li>
 <li><a href="api.html">API Reference</a> — every public type.</li>
 </ul>
+
+
+<h2>3. SwiftUI integration</h2>
+<p><code>MTTerrainView</code> is a <code>UIView</code> (<code>MTKView</code> subclass),
+so wrap it with <code>UIViewRepresentable</code>:</p>
+<pre><code class="language-swift">import SwiftUI
+import MetalTerrain
+
+struct TerrainViewWrapper: UIViewRepresentable {
+    let world: MTTerrainWorld
+
+    func makeUIView(context: Context) -&gt; MTTerrainView {
+        let tv = MTTerrainView(frame: .zero)
+        tv.world = world
+        // Drive the camera every frame. Keep this closure cheap:
+        // it runs on the render thread.
+        tv.onFrame = { view, dt in
+            context.coordinator.updateCamera(view: view, dt: dt)
+        }
+        return tv
+    }
+
+    func updateUIView(_ uiView: MTTerrainView, context: Context) {
+        // Push SwiftUI state (sliders, toggles) into the renderer here.
+        uiView.renderer?.sunElevation = context.coordinator.sunElevation
+    }
+
+    func makeCoordinator() -&gt; Coordinator { Coordinator() }
+
+    class Coordinator {
+        var yaw: Float = 0, pitch: Float = -0.5, distance: Float = 900
+        var sunElevation: Float = 0.6
+        var target = SIMD3&lt;Float&gt;(0, 0, 0)
+
+        func updateCamera(view: MTTerrainView, dt: TimeInterval) {
+            yaw += Float(dt) * 0.1  // slow auto-orbit; replace with your input
+            let eye = SIMD3&lt;Float&gt;(
+                target.x + distance * cos(pitch) * sin(yaw),
+                target.y + distance * sin(pitch),
+                target.z + distance * cos(pitch) * cos(yaw))
+            let aspect = Float(view.bounds.width / max(1, view.bounds.height))
+            view.setCamera(position: eye, target: target, aspect: aspect)
+        }
+    }
+}
+</code></pre>
+<div class="callout"><p><strong>Threading rule:</strong> <code>onFrame</code> runs on the
+render thread, not the main thread. It is safe to call <code>setCamera</code> and read
+<code>view.renderer</code> there. Do <em>not</em> touch UIKit/SwiftUI state from inside
+it — copy values into your coordinator on the main thread and read them in
+<code>onFrame</code>.</p></div>
+
+<h2>4. Your first camera rig: orbit + walk</h2>
+<p>Two camera modes cover 90% of apps. The library never moves the camera for you —
+these snippets are the standard patterns:</p>
+<pre><code class="language-swift">// ORBIT (third-person / map view)
+func orbitCamera(view: MTTerrainView, target: SIMD3&lt;Float&gt;,
+                 yaw: Float, pitch: Float, distance: Float) {
+    let eye = SIMD3&lt;Float&gt;(
+        target.x + distance * cos(pitch) * sin(yaw),
+        max(10, target.y + distance * sin(pitch)),  // never below ground plane
+        target.z + distance * cos(pitch) * cos(yaw))
+    let aspect = Float(view.bounds.width / max(1, view.bounds.height))
+    view.setCamera(position: eye, target: target, aspect: aspect)
+}
+
+// WALK (first-person). Sample the terrain so the eye stays above ground.
+func walkCamera(view: MTTerrainView, world: MTTerrainWorld,
+                pos: SIMD2&lt;Float&gt;, yaw: Float, eyeHeight: Float = 2) {
+    let groundY = world.worldY(forHeight: world.heightAt(x: Double(pos.x),
+                                                         z: Double(pos.y)))
+    // Look ahead: keeps the camera out of uphill terrain.
+    let ahead = pos + SIMD2&lt;Float&gt;(sin(yaw), cos(yaw)) * 8
+    let aheadY = world.worldY(forHeight: world.heightAt(x: Double(ahead.x),
+                                                        z: Double(ahead.y)))
+    let eye = SIMD3&lt;Float&gt;(pos.x, max(groundY, aheadY) + eyeHeight, pos.y)
+    let look = eye + SIMD3&lt;Float&gt;(sin(yaw), -0.1, cos(yaw)) * 10
+    let aspect = Float(view.bounds.width / max(1, view.bounds.height))
+    view.setCamera(position: eye, target: look, aspect: aspect)
+}
+</code></pre>
+<p>See <a href="guide-camera.html">Camera &amp; Input</a> for the full guide:
+smoothing, collision with terrain, water blocking, and frame-rate-independent movement.</p>
+
+<h2>5. Choosing a spawn point</h2>
+<p>Don't spawn at the origin blindly — it might be ocean. Use the built-in search:</p>
+<pre><code class="language-swift">let world = MTTerrainWorld(seed: 1337)
+let spawn = world.findSafeSpawn()   // SIMD2&lt;Float&gt;: land above sea level, below mountains
+// Falls back to (0, 0) on pathological ocean-heavy seeds — check the height:
+let h = world.heightAt(x: Double(spawn.x), z: Double(spawn.y))
+assert(h &gt; world.config.seaLevel, &quot;spawn is underwater; pick another seed&quot;)
+</code></pre>
+<p><code>findSafeSpawn()</code> spiral-searches outward from the origin and returns the
+first point that is safely above sea level but not in the high mountains. It's
+deterministic per seed.</p>
+
+<h2>Common mistakes</h2>
+<table>
+<thead><tr><th>Mistake</th><th>Symptom</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td>Never calling <code>setCamera</code></td><td>Black screen, but FPS counter runs</td>
+<td>Drive the camera every frame from <code>onFrame</code>.</td></tr>
+<tr><td>Camera below the terrain</td><td>Black screen or inside-the-mountain view</td>
+<td>Sample <code>world.heightAt</code> and keep the eye above it (see walk snippet).</td></tr>
+<tr><td>Changing <code>config</code> every frame</td><td>Constant re-generation, low FPS</td>
+<td>Batch config changes; the world bumps <code>configVersion</code> and rebuilds on each set.</td></tr>
+<tr><td>Reading <code>world.seed</code> to "randomize"</td><td>Same world every launch</td>
+<td>That's the point — store a user-chosen seed, e.g. <code>UInt64.random(in: 1...999_999)</code> once.</td></tr>
+<tr><td>Forgetting <code>aspect</code></td><td>Stretched terrain</td>
+<td>Pass the real view aspect every frame; update on rotation.</td></tr>
+<tr><td>Heavy work in <code>onFrame</code></td><td>Frame hitches</td>
+<td>Keep it to camera math. Do game logic on the main thread.</td></tr>
+</tbody>
+</table>
+
+<h2>Troubleshooting</h2>
+<h3>The view is black but the app runs</h3>
+<ul>
+<li>Is <code>world</code> assigned? <code>MTTerrainView</code> with a nil world renders nothing.</li>
+<li>Is <code>setCamera</code> being called? Add a breakpoint or print in <code>onFrame</code>.</li>
+<li>Is the camera under the terrain? Print the eye Y vs <code>worldY(forHeight: heightAt)</code>.</li>
+<li>Check the Xcode console for Metal validation errors (enable Metal API Validation in the scheme).</li>
+</ul>
+<h3>Terrain appears but is flat gray</h3>
+<p>Biome lookup may be failing — verify <code>config.biomes</code> is non-empty, or call
+<code>world.resetBiomesToDefault()</code>. A custom biome with an inverted
+<code>minHeight &gt; maxHeight</code> band matches nothing.</p>
+<h3>It works in the simulator but is slow</h3>
+<p>Expected. The iOS Simulator has no GPU — Metal runs on the CPU. Always judge
+performance on a physical device. (The simulator is still fine for layout and logic.)</p>
+<h3>Build error: "no such module 'MetalTerrain'"</h3>
+<p>The package wasn't added to the app target. In Xcode: select the app target →
+General → Frameworks, Libraries, and Embedded Content → confirm MetalTerrain is listed.
+If your app is itself a Swift package, check the <code>dependencies</code> array in
+<code>Package.swift</code>.</p>
 
   </main>
 </div>

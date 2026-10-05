@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration Notes — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain migration notes: version changes, corrected defaults, and upgrade checklists.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Migration Notes</h1>
+<p class="lead">What changed between versions, and what to do about it. Read the
+section for the version you're coming from.</p>
+
+<h2>Current defaults (authoritative)</h2>
+<p>Several doc comments in the source list outdated defaults. The
+<strong>initializer</strong> values below are what actually ships — if in doubt,
+trust the init signature, not the comment above the property:</p>
+<table>
+<thead><tr><th>Parameter</th><th>Actual default</th><th>Stale comment says</th></tr></thead>
+<tbody>
+<tr><td><code>MTTerrainConfig.chunkResolution</code></td><td>250</td><td>96</td></tr>
+<tr><td><code>MTTerrainConfig.chunkWorldSize</code></td><td>1000</td><td>128</td></tr>
+<tr><td><code>MTTerrainConfig.heightScale</code></td><td>400</td><td>60</td></tr>
+<tr><td><code>MTNoiseConfig.baseFrequency</code></td><td>0.004</td><td>0.008</td></tr>
+<tr><td><code>MTNoiseConfig.gain</code></td><td>0.42</td><td>0.5</td></tr>
+<tr><td><code>MTNoiseConfig.warpStrength</code></td><td>0.25</td><td>0.35</td></tr>
+<tr><td><code>MTNoiseConfig.warpFrequency</code></td><td>0.015</td><td>0.02</td></tr>
+</tbody>
+</table>
+<p>If you copied the comment values into your config, your terrain was tuned against
+numbers that were never real — re-tune from the actual defaults.</p>
+
+<h2>Library-only split (v1.1)</h2>
+<p>MetalTerrain became <strong>library-only</strong>: the old <code>Demo/</code> app
+was removed and now lives in the separate
+<a href="https://github.com/a-user-of-python/NativeMetalTerrain">NativeMetalTerrain</a>
+repository. If you forked the demo:</p>
+<ul>
+<li>Library code → <code>a-user-of-python/MetalTerrain</code> (this repo).</li>
+<li>App code (camera, input, UI) → your own app; use <code>MTTerrainView</code>.</li>
+<li>New in the split: <code>MTTerrainView</code> (drop-in <code>MTKView</code>) and
+<code>MTTerrainWorld.findSafeSpawn()</code>.</li>
+</ul>
+
+<h2>Chunk resolution raised (250)</h2>
+<p><code>chunkResolution</code> moved 64 → 128 → 192 → 250 across releases as device
+headroom allowed. If you pinned 64 for performance, re-profile before assuming you
+still need to: the noise path is ~5× faster than it was (bitwise lattice wrap, fewer
+mask octaves, hoisted config, lock-free biome lookup).</p>
+
+<h2>LOD temporarily disabled</h2>
+<p>Half-resolution distant chunks are currently disabled (all chunks build full-res)
+while border stitching is implemented, to eliminate T-junction cracks. When LOD
+returns, <code>buildLOD(for:world:distanceFactor:)</code> will select strides again —
+no API change; distant chunks just get cheaper. If you wrote custom meshing against
+<code>resolutionScale</code>, keep passing it: <code>generateChunk(at:resolutionScale:)</code>
+still honors it.</p>
+
+<h2>Water contract hardened</h2>
+<p>Water is now contractually a <strong>flat plane</strong>: geometric displacement
+never touches water vertices, and there's no foam or shoreline effect. If you built
+custom water visuals on the old animated-geometry water, move the animation into the
+fragment shader.</p>
+
+<h2>Mirrors removed (app-level)</h2>
+<p>Live mirror reflections were removed from the reference car's implementation. The
+<code>renderReflection(to:from:lookingAt:)</code> API itself is unchanged and still
+available for app-level effects.</p>
+
+<h2>viewDistance max raised to 10</h2>
+<p><code>MTTerrainConfig.viewDistance</code> clamps to 1…10 (was lower). The
+performance guide's budget math is quadratic — 10 is for M3-class devices or
+screenshots, not a default.</p>
+
+<h2>Checklist when upgrading</h2>
+<ol>
+<li>Diff your pinned config against the authoritative defaults table above.</li>
+<li>Re-check spawn logic: <code>findSafeSpawn()</code> exists now — use it instead of
+hardcoded coordinates.</li>
+<li>If you used the demo app as a starting point, migrate camera/input/UI to
+<code>MTTerrainView</code> + <code>onFrame</code>.</li>
+<li>Re-profile on your lowest supported device; don't assume old tuning still applies.</li>
+</ol>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

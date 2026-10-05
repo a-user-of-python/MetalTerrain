@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Structures Guide — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain structures: the seven kinds, deterministic placement, instanced rendering.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Structures Guide</h1>
+<p class="lead">Seeded low-poly structures — houses, towers, trees, boulders, wells,
+windmills, dungeons — placed deterministically and drawn with one instanced draw call
+per kind.</p>
+
+<h2>The seven kinds</h2>
+<table>
+<thead><tr><th>Kind</th><th>What it is</th><th>Geometry</th></tr></thead>
+<tbody>
+<tr><td><code>house</code></td><td>Plaster hut with roof prism, chimney, door</td><td>Boxes + triangular prism</td></tr>
+<tr><td><code>tower</code></td><td>Stone watchtower with crenellations</td><td>Cylinders + boxes</td></tr>
+<tr><td><code>tree</code></td><td>Two-tier conifer</td><td>Cylinder trunk + 2 cones</td></tr>
+<tr><td><code>boulder</code></td><td>Displaced sphere rock</td><td>Icosphere-ish, noise-displaced</td></tr>
+<tr><td><code>well</code></td><td>Stone well with posts and roof</td><td>Cylinder + boxes + prism</td></tr>
+<tr><td><code>windmill</code></td><td>Tower mill with rotating-cap silhouette</td><td>Cylinder + boxes (blades as quads)</td></tr>
+<tr><td><code>dungeon</code></td><td>Dark entrance mound</td><td>Displaced half-buried structure</td></tr>
+</tbody>
+</table>
+<p>All meshes are <strong>original procedural geometry</strong> — boxes, prisms,
+cylinders, cones, displaced spheres — unit-ish in scale (a few world units tall, base
+at <code>y = 0</code>). <code>MTStructureBuilder.mesh(for:)</code> is deterministic:
+same kind → identical geometry, every time.</p>
+
+<h2>Placement policy</h2>
+<p>Placement lives in <code>MTTerrainWorld</code>, not in the mesh code:</p>
+<ul>
+<li><strong>12 candidates per chunk</strong> from a chunk-seeded PRNG — the same chunk
+always proposes the same candidates.</li>
+<li>A candidate is <strong>kept</strong> when the structure-density noise field
+(<code>config.structureNoise</code>, default seed 90210, 3 octaves, no warp) exceeds a
+threshold derived from <code>config.structureDensity</code> (default 0.35).</li>
+<li>Kept candidates must sit on land: terrain height in
+<code>[beachTop, 0.85]</code> — no structures in the ocean, none on the highest peaks.</li>
+<li>The <strong>kind</strong> comes from a second noise field mapped over the 7 kinds;
+<strong>rotation</strong> (radians about Y) and <strong>scale</strong> (uniform) come
+from the PRNG.</li>
+<li><code>structuresEnabled == false</code> → <code>structures(in:)</code> returns
+<code>[]</code>. Toggling is live.</li>
+</ul>
+<pre><code class="language-swift">// Query placements yourself (e.g. for gameplay logic):
+let placements: [MTStructurePlacement] =
+    world.structures(in: MTChunkCoord(x: 3, z: -2))
+for p in placements {
+    print(p.kind, p.position, p.rotationY, p.scale)
+}
+
+// Tune density / toggle:
+var config = MTTerrainConfig.default
+config.structureDensity = 0.6   // more structures (0...1, clamped)
+config.structuresEnabled = true
+world.config = config
+world.structuresEnabled = false // live alias — clears instances immediately
+</code></pre>
+<h2>Rendering: one instanced draw per kind</h2>
+<p>The renderer queries <code>world.structures(in:)</code> for each visible chunk on
+the build queue, then fills <strong>per-kind instance buffers</strong> (model matrix +
+tint, 80-byte <code>MTInstanceData</code>). Each frame draws all houses in one
+instanced call, all trees in one, and so on — 7 draw calls total regardless of count.</p>
+<ul>
+<li>Instance buffers are rebuilt <strong>only when the visible chunk set changes</strong>
+(or the enabled flag toggles) — no per-frame cost.</li>
+<li>Placement queries run on the build queue; the buffer swap happens on the main
+queue.</li>
+<li>Structures are <strong>double-sided</strong> (cull mode <code>.none</code>):
+generated low-poly triangles occasionally have inconsistent winding, and visible is
+better than "correct but missing".</li>
+<li>Structures are <strong>skipped in reflection passes</strong> (mirror images are
+small; the cost isn't worth it).</li>
+<li>Structures are <strong>not</strong> in the ray-tracing acceleration structures —
+only terrain chunks are traced.</li>
+</ul>
+
+<h2>Custom structures</h2>
+<p>The placement system is in the world module; the mesh system is open for extension:</p>
+<pre><code class="language-swift">// Build any kind&#x27;s mesh for your own use (previews, editors):
+let (vertices, indices) = MTStructureBuilder.mesh(for: .windmill)
+// vertices: [MTSimpleVertex] (position/normal/color as SIMD3&lt;Float&gt;)
+// indices: [UInt32]
+
+// Convert to the terrain vertex format if you need to render it yourself:
+let terrainVerts = vertices.map {
+    MTVertex(position: $0.position, normal: $0.normal, color: $0.color)
+}
+</code></pre>
+<p>Adding a brand-new kind means: a new <code>MTStructureKind</code> case, a builder
+function in <code>MTStructures.swift</code>, and a placement rule in the world module.
+The instanced renderer picks up new cases automatically via
+<code>MTStructureKind.allCases</code>.</p>
+
+<h2>Best practices</h2>
+<ul>
+<li><strong>Don't fight the density field.</strong> If you want a village <em>here</em>,
+place it yourself as app-level content via the <code>overlay</code> closure — the
+seeded scatter is for ambient dressing, not quest locations.</li>
+<li><strong>Test toggle behavior.</strong> <code>structuresEnabled = false</code> must
+clear instances without rebuilding the world (it does — but verify in your UI flow).</li>
+<li><strong>Mind the scale.</strong> Structures are a few world units tall against
+1000-unit chunks and a 400-unit height scale. They're set dressing, not architecture
+to walk through — unless you scale them up via custom placements.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

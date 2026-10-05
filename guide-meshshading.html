@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -89,6 +97,71 @@ where CPU vertex expansion and buffer uploads dominate. See <a href="guide-perfo
 <ul>
 <li><a href="guide-raytracing.html">Ray Tracing</a> — mesh-shaded chunks still provide BLAS geometry for shadows.</li>
 <li><a href="api.html#mtcapabilities">MTCapabilities</a></li>
+</ul>
+
+
+<h2>The two paths, side by side</h2>
+<table>
+<thead><tr><th>Stage</th><th>Standard path (all devices)</th><th>Mesh-shader path (M3+/A17 Pro+)</th></tr></thead>
+<tbody>
+<tr><td>Height sampling</td><td>CPU: <code>MTMeshBuilder</code> on background queue</td>
+<td>GPU: mesh shader samples the heightmap texture</td></tr>
+<tr><td>Vertex emission</td><td>CPU writes <code>MTLBuffer</code>s</td>
+<td>Mesh shader emits triangles directly</td></tr>
+<tr><td>Frustum culling</td><td>CPU: per-chunk AABB test</td>
+<td>Object shader: culled chunks dispatch zero threadgroups</td></tr>
+<tr><td>LOD selection</td><td>CPU: <code>buildLOD</code> stride</td>
+<td>Object shader: threadgroup count from chunk LOD</td></tr>
+<tr><td>Fragment shading</td><td colspan="2" style="text-align:center"><em>Pixel-identical</em> (<code>mesh_terrain_fragment</code> ≡ <code>terrain_fragment</code>)</td></tr>
+</tbody>
+</table>
+
+<h2>Shader anatomy</h2>
+<ul>
+<li><strong>Object shader</strong> (<code>mesh_terrain_object</code>): one threadgroup
+per chunk. Performs frustum culling and computes how many mesh threadgroups to dispatch
+based on the chunk's LOD. This is where off-screen chunks die for free.</li>
+<li><strong>Mesh shader</strong> (<code>mesh_terrain_mesh</code>): one threadgroup per
+8×8-quad tile. Samples the heightmap, computes positions, normals, and biome colors,
+applies procedural detail displacement, and emits triangles — no CPU vertex buffers
+involved.</li>
+<li><strong>Fragment shader</strong> (<code>mesh_terrain_fragment</code>): identical to
+the standard fragment shader, including the smooth wireframe overlay and per-material
+lighting.</li>
+</ul>
+
+<h2>Engagement and fallback</h2>
+<pre><code class="language-swift">// M3_FEATURES builds only. Default true; engages only when ALL hold:
+//   1. M3_FEATURES compiled in
+//   2. GPU is Apple family 9+ (M3/M4/M5, A17 Pro+)
+//   3. The mesh pipeline compiled successfully (best-effort async)
+terrainView.meshShadingEnabled = true   // set false to force the standard path
+
+// Query support (pure query, safe at startup):
+MTCapabilities.supportsMeshShading(device: device)
+</code></pre>
+<p>Fallback is automatic and silent: if mesh shading is unavailable or the pipeline
+fails to compile, the renderer uses the standard vertex-shader path. The visual result
+is identical — mesh shading is a performance optimization, not a visual feature. The
+mesh pipeline compiles <strong>asynchronously</strong> (<code>Task</code> +
+<code>await</code>); the standard path renders until it lands, so there's no startup
+hitch.</p>
+
+<h2>What it buys you</h2>
+<ul>
+<li><strong>Zero CPU mesh-generation overhead</strong> — no <code>MTMeshBuilder</code>
+on the background queue, no 48-byte-vertex uploads per chunk.</li>
+<li><strong>GPU-side frustum culling</strong> in the object shader — culled chunks cost
+one threadgroup that immediately exits.</li>
+<li><strong>Detail displacement for free</strong> — the procedural 3D detail
+(<code>detailAmount</code>) happens naturally as the mesh shader emits vertices.</li>
+</ul>
+<h2>What it doesn't do</h2>
+<ul>
+<li>It doesn't change what you see. If you're A/B testing and can't tell which path is
+active, that's correct behavior.</li>
+<li>It doesn't remove the need for chunk streaming — the object shader still works on
+the streamed chunk set; it just meshes them on the GPU.</li>
 </ul>
 
   </main>

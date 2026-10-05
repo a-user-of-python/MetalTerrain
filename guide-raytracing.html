@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -105,6 +113,92 @@ visual difference is intentionally subtle.</p></div>
 <li><a href="guide-meshshading.html">Mesh Shading</a> — the other M3-family feature (they combine).</li>
 <li><a href="guide-skybox.html">Skybox</a> — the sun position shadows are traced toward.</li>
 <li><a href="api.html#mtraytracing">MTRayTracing</a> · <a href="api.html#mtcapabilities">MTCapabilities</a></li>
+</ul>
+
+
+<h2>How it works, concretely</h2>
+<p>When the build flag <code>M3_FEATURES</code> is set <strong>and</strong> the device
+has hardware ray-tracing units, the renderer builds two levels of acceleration
+structure:</p>
+<ul>
+<li><strong>BLAS</strong> (bottom-level): one per terrain chunk, built from the chunk's
+triangle soup. Cached by chunk ID; evicted when the chunk leaves the visible set.</li>
+<li><strong>TLAS</strong> (top-level): one for the whole scene, instancing every visible
+chunk's BLAS with identity transforms (chunk meshes are already in world space).</li>
+</ul>
+<p>The shadow pass binds the TLAS at <strong>fragment buffer index 3</strong> and
+switches to the <code>terrain_fragment_rt</code> pipeline variant. Rays are traced from
+the surface point toward the sun; anything the ray hits is in shadow.</p>
+<pre><code>chunks stream in ─▶ BLAS per chunk (cached by id)
+                        │
+visible set changes ────┴─▶ TLAS rebuild (throttled: every 15 frames)
+                                │
+                    terrain_fragment_rt traces sun rays against TLAS
+                                │
+                    hit → shadowed │ miss → lit (× analytic shading)</code></pre>
+
+<h2>Design intent: subtle, not dramatic</h2>
+<p>The ray-traced shadows <strong>enhance the analytic shadows rather than replacing
+them</strong>. On real terrain the effect reads as "contact shadows are a bit deeper
+and more correct in the valleys" — not as a different lighting model. If you're
+expecting dramatic long sunset shadows, adjust <code>sunElevation</code> low; the RT
+shadows follow the same sun as everything else.</p>
+
+<h2>Enabling it</h2>
+<p>Two conditions, both required:</p>
+<ol>
+<li>Compile with the <code>M3_FEATURES</code> Swift <em>and</em> Metal build flag.</li>
+<li>Run on M3/M4/M5 (any variant), A17 Pro, A18/A18 Pro, or A19/A19 Pro+.</li>
+</ol>
+<p>The renderer checks <code>MTCapabilities.supportsHardwareRayTracing(device:)</code>
+in <code>init</code> and keeps the <code>MTRayTracing</code> instance only when both
+hold. There is <strong>no public on/off switch</strong> and <strong>no software
+fallback</strong> — on unsupported configurations the standard analytic shadow path
+renders, pixel-identical to a non-M3 build.</p>
+<pre><code class="language-swift">// Check at startup (e.g. to show/hide an &quot;Enhanced&quot; toggle):
+let rtOK = MTCapabilities.supportsHardwareRayTracing(device: device)
+
+// At runtime (M3_FEATURES builds only):
+if terrainView.rayTracingActive {
+    // The TLAS exists and the RT shadow pipeline is engaged this frame.
+}
+</code></pre>
+<h2>Performance characteristics</h2>
+<ul>
+<li><strong>BLAS builds</strong> happen as chunks stream in — amortized, off the
+critical path.</li>
+<li><strong>TLAS rebuilds</strong> are the expensive part. The renderer throttles
+<code>MTRayTracing.update(chunks:)</code> to every 15 frames, and
+<code>update</code> itself skips the rebuild when the chunk-id set and transforms are
+unchanged (one signature comparison). Net effect: no per-frame cost once streaming
+settles.</li>
+<li><strong>Per-pixel cost</strong>: one shadow ray per fragment in the RT pipeline
+variant. Bounded and predictable — no recursion, no multi-bounce.</li>
+<li>If you see hitches correlated with fast movement on M3 builds, the TLAS is the
+first suspect; the 15-frame throttle exists specifically for this.</li>
+</ul>
+
+<h2>API surface</h2>
+<pre><code class="language-swift">public final class MTRayTracing {
+    public init(device: MTLDevice)   // unsupported device → safe no-ops
+    public var isSupported: Bool     // HW units AND M3_FEATURES build
+    public var topLevelStructure: MTLAccelerationStructure?  // bind at frag buf 3
+    public func update(chunks: [(id: Int, vertexBuffer: MTLBuffer,
+                                 indexBuffer: MTLBuffer, indexCount: Int,
+                                 transform: matrix_float4x4)])
+}
+// Renderer side:
+renderer.rayTracing  // MTRayTracing? — nil without M3_FEATURES or HW support
+</code></pre>
+<h2>Limits and non-goals</h2>
+<ul>
+<li>Sun shadows only. No reflections, no ambient occlusion, no global illumination —
+those would need a very different (and much more expensive) ray budget.</li>
+<li>Structures and water are <strong>not</strong> in the acceleration structures;
+only terrain chunks are traced.</li>
+<li>The TLAS reflects the <em>visible chunk set</em>, throttled — during very fast
+flight a newly streamed chunk may shade analytically for a few frames before its BLAS
+lands. This is intentional (smoothness over exactness).</li>
 </ul>
 
   </main>

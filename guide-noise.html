@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -139,6 +147,161 @@ world.config = config</code></pre>
 <ul>
 <li>The structure field (<code>config.structureNoise</code>) has its own seed — re-roll structures without reshaping terrain.</li>
 <li><strong>Caveat:</strong> changing <em>any</em> noise knob produces a different world. Version your config alongside the seed if you ship seeds to users.</li>
+</ul>
+
+
+<h2>The height pipeline, layer by layer</h2>
+<p><code>height(x:y:config:)</code> is not a single noise call — it's a small terrain
+synthesizer. Understanding the layers is what separates "random bumps" from
+"that looks like a real place". Layers run in this order:</p>
+<ol>
+<li><strong>Continent mask</strong> (very low frequency, 2 octaves). Decides where the
+big landmasses and oceans are. Deliberately only 2 octaves — for something this
+smooth, a third octave is visually indistinguishable and costs ~19% more noise
+evaluations per vertex.</li>
+<li><strong>Domain warp.</strong> When <code>warpStrength &gt; 0</code>, the sample point
+itself is bent by a 3-octave fbm vector field before the main noise is evaluated.
+This is the single biggest "naturalness" lever: it turns blobby Perlin islands into
+coastlines with bays, peninsulas, and personality. Cost: a few extra noise evals per
+vertex — worth it.</li>
+<li><strong>Base detail</strong> — fbm, or ridged multifractal when
+<code>config.ridged</code> is true (mountain mode: <code>(1 − |n|)²</code> per octave
+gives sharp crests instead of soft hills).</li>
+<li><strong>Mountain ranges</strong> — a separate ridged noise at ~0.35× frequency
+(ranges span multiple chunks), masked so only ~35% of land gets mountains. Peaks are
+rounded with <code>pow(ridged, 0.72)</code> so summits look like mountains, not spikes.</li>
+<li><strong>Rivers</strong> — carved where a warped low-frequency field is near zero,
+masked to land and reduced on mountainsides. Rivers carve down to just below sea
+level so they actually hold water.</li>
+<li><strong>Combine + coastal shelf.</strong> Everything is summed, then heights near
+sea level are flattened toward a shelf value so beaches read as beaches instead of
+cliff-edged bathtubs. Final result is clamped to <code>0…1</code>.</li>
+</ol>
+<pre><code>continent (0.18× freq, 2 oct) ──▶ land/ocean mask
+detail (warped fbm | ridged) ──▶ hills
+mountains (0.35× ridged, masked) ──▶ ranges
+rivers (warped, carved to &lt; sea) ──▶ valleys
+            │ combine: h = 0.5 + continent·0.55 + detail·0.28 − mountains mask…
+            ▼
+   coastal shelf flatten ──▶ clamp 0…1 ──▶ height</code></pre>
+
+<h2>Parameter guide — what each knob actually does</h2>
+<table>
+<thead><tr><th>Parameter</th><th>Default</th><th>Range</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>seed</code></td><td><code>1337</code></td><td>any <code>UInt64</code></td>
+<td>Selects a completely different world. Same seed + same config = same world, always.</td></tr>
+<tr><td><code>octaves</code></td><td><code>5</code></td><td>1…12 (clamped)</td>
+<td>Detail layers. Each octave roughly doubles the triangle-level detail — and the cost.
+3 = stylized/low-poly feel, 5 = natural default, 8+ = extremely rugged (and slow).</td></tr>
+<tr><td><code>baseFrequency</code></td><td><code>0.004</code></td><td>&gt; 0</td>
+<td>How "zoomed in" the noise is. Halve it → features twice as wide (rolling continents).
+Double it → busy, choppy terrain. This is the coarsest feel control.</td></tr>
+<tr><td><code>amplitude</code></td><td><code>1.0</code></td><td>&gt; 0</td>
+<td>Overall height of the detail layer. Rarely needs changing — prefer <code>heightScale</code>.</td></tr>
+<tr><td><code>lacunarity</code></td><td><code>2.03</code></td><td>~1.5…4</td>
+<td>Frequency multiplier per octave. 2.0 = classic; higher = finer grain between layers.</td></tr>
+<tr><td><code>gain</code></td><td><code>0.42</code></td><td>0…1</td>
+<td>Amplitude multiplier per octave. Lower = smoother (high octaves contribute less);
+higher = rougher, more "crunchy" detail.</td></tr>
+<tr><td><code>warpStrength</code></td><td><code>0.25</code></td><td>0…~1</td>
+<td>Domain-warp amount. 0 = classic blobby Perlin; 0.25 = natural coastlines;
+0.6+ = swirly, surreal. Costs extra noise evals — set 0 for max speed.</td></tr>
+<tr><td><code>warpFrequency</code></td><td><code>0.015</code></td><td>&gt; 0</td>
+<td>Scale of the warp field. Lower = broad bends (continental drift feel);
+higher = local squiggles.</td></tr>
+<tr><td><code>ridged</code></td><td><code>false</code></td><td>bool</td>
+<td>Mountain mode for the detail layer. Sharp crests and V-valleys instead of soft hills.
+Combine with the built-in mountain-range layer for the Alps; leave off for farmland.</td></tr>
+</tbody>
+</table>
+<div class="callout"><p><strong>Heads-up on stale comments:</strong> the doc comments on
+<code>MTNoiseConfig</code>'s properties list older defaults
+(<code>baseFrequency</code> 0.008, <code>gain</code> 0.5, <code>warpStrength</code> 0.35,
+<code>warpFrequency</code> 0.02). The <strong>initializer defaults</strong> in the table
+above are authoritative.</p></div>
+
+<h2>Recipes</h2>
+<h3>Rolling farmland with a distant mountain range (default-ish)</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig()  // defaults are already this
+noise.octaves = 4
+noise.warpStrength = 0.25
+noise.ridged = false
+</code></pre>
+<h3>Alpine — sharp peaks everywhere</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig()
+noise.ridged = true
+noise.octaves = 6
+noise.gain = 0.5          // let high octaves bite
+noise.warpStrength = 0.35 // dramatic ridgelines
+</code></pre>
+<h3>Archipelago — scattered islands</h3>
+<p>Islands come from the continent layer, not the detail layer. Lower the continent
+influence by raising sea level instead of fighting the noise:</p>
+<pre><code class="language-swift">var config = MTTerrainConfig.default
+config.seaLevel = 0.55   // drowns everything but the high bits → islands
+config.noise.baseFrequency = 0.003  // broader continents = bigger island groups
+</code></pre>
+<h3>Low-poly stylized</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig()
+noise.octaves = 2
+noise.warpStrength = 0.0  // clean geometric shapes
+noise.gain = 0.5
+</code></pre>
+<h3>Maximum-performance noise (older devices)</h3>
+<pre><code class="language-swift">var noise = MTNoiseConfig()
+noise.octaves = 3
+noise.warpStrength = 0.0  // skips the warp field entirely
+</code></pre>
+<p>Warp is the most expensive single toggle — disabling it saves several noise
+evaluations per vertex. Dropping from 5 to 3 octaves saves ~40% of noise cost.</p>
+
+<h2>Sampling API</h2>
+<p>Four public samplers. All are pure functions of <code>(config, x, y)</code> —
+note they rebuild the Perlin permutation table per call, so for bulk sampling use
+<code>world.generateChunk(at:)</code> (which builds tables once) instead of looping
+<code>height(x:y:config:)</code> yourself.</p>
+<pre><code class="language-swift">// Full terrain height in 0...1 (the one you want 99% of the time)
+let h: Float = height(x: 1234.5, y: -678.0, config: config.noise)
+
+// Raw fractal Brownian motion, roughly [-1, 1] — for custom masks
+let f: Double = fbm(config.noise, x: x, y: y)
+
+// Ridged multifractal in [0, 1] — sharp crests, for custom mountain logic
+let r: Double = ridged(config.noise, x: x, y: y)
+
+// Seeded 2D gradient noise in [-1, 1]; NaN/inf inputs safely return 0
+let n = MTPerlinNoise(seed: 42)
+let v: Double = n.noise(x: x, y: y)
+
+// Deterministic PRNG for gameplay logic (loot, scatter, names)
+var rng = MTSeededRandom(seed: world.seed ^ 0x9E3779B97F4A7C15)
+let roll = rng.nextDouble()      // [0, 1)
+let pick = rng.nextInt(upperBound: 7)
+</code></pre>
+<h2>Performance notes</h2>
+<ul>
+<li><code>MTPerlinNoise.noise(x:y:)</code> is called <strong>~2M times per chunk</strong>
+at full resolution. It uses a bitwise <code>&amp; 255</code> lattice wrap instead of
+floating-point modulo (~20–50 cycles saved per call on ARM) — this is why chunk builds
+are fast, not because the math is simple.</li>
+<li>Octaves are clamped to 1…12. Above ~8 you get diminishing visual returns for
+linearly increasing cost.</li>
+<li>The continent mask deliberately uses 2 octaves instead of 3 — visually identical
+for something that smooth, ~19% cheaper per vertex.</li>
+<li>If you sample heights yourself (minimaps, AI), prefer <code>world.heightAt(x:z:)</code>
+over the free functions — the world caches the permutation tables per seed.</li>
+</ul>
+
+<h2>Determinism contract</h2>
+<p>Every noise function is a pure function of <code>(seed, x, y)</code>. There is no
+<code>SystemRandomNumberGenerator</code>, no <code>Date</code>, no I/O anywhere in the
+noise path. Consequences you can rely on:</p>
+<ul>
+<li>The same seed renders the identical world on an iPhone SE and an iPad Pro.</li>
+<li>Regenerating a chunk after eviction produces bit-identical heights.</li>
+<li>Your minimap, spawn logic, and structure placement all agree with the renderer
+without any synchronization — they all call the same functions.</li>
 </ul>
 
   </main>

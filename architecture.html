@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain architecture: modules, data flow, threading model, and design invariants.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Architecture</h1>
+<p class="lead">How MetalTerrain fits together: the module layout, the data flow from
+seed to pixels, the threading model, and why the library/app split exists.</p>
+
+<h2>Module map</h2>
+<pre><code>MetalTerrain/
+├── Core/                      pure Swift, no Metal, no I/O
+│   ├── MTTerrainWorld.swift   the world: seed + config → heights, biomes, structures
+│   ├── MTConfig.swift         MTTerrainConfig — every tweakable, clamped
+│   ├── MTChunk.swift          MTChunkCoord + MTChunk (heightmap grid)
+│   ├── MTBiome.swift          MTBiome — height bands with coloring rules
+│   └── MTCapabilities.swift   GPU feature queries (ray tracing, mesh shading)
+├── Noise/                     pure Swift, deterministic
+│   ├── MTNoise.swift          MTNoiseConfig + the layered height pipeline
+│   ├── MTPerlinNoise.swift    seeded 2D gradient noise
+│   └── MTSeededRandom.swift   xorshift64* PRNG — the only "randomness" anywhere
+├── Rendering/                 Swift + Metal
+│   ├── MTTerrainView.swift    MTKView subclass — the zero-boilerplate entry point
+│   ├── MTTerrainRenderer.swift chunk streaming, LOD, draw submission
+│   ├── MTMeshBuilder.swift    height grids → indexed triangle meshes
+│   ├── MTRayTracing.swift     BLAS/TLAS for hardware sun shadows (M3_FEATURES)
+│   └── MTSkybox.swift         procedural sky + sun disc
+└── Structures/                pure Swift geometry
+    └── MTStructures.swift     7 procedural structure meshes + placement types</code></pre>
+<p>The dependency arrows point one way: <strong>Rendering → Core/Noise</strong>, and
+<strong>Structures</strong> is standalone geometry. Nothing in Core or Noise imports
+Metal — you can unit-test world generation on any platform, including Linux.</p>
+
+<h2>Data flow: seed to pixels</h2>
+<pre><code> (1) SAMPLE          (2) MESH           (3) STREAM          (4) SHADE
+ seed,config ─▶ heights ─▶ vertices ─▶ GPU buffers ─▶ pixels
+    │               │            │              │             │
+ MTTerrainWorld  MTMeshBuilder  background    MTTerrainRenderer  Metal shaders
+ heightAt()      buildTerrain-  queue         update() → draw()
+ generateChunk() Mesh()         (nearest-     1 draw/chunk
+                 normals via     first)       + water + sky
+                 central diffs   LRU cache
+                 skirts</code></pre>
+<ol>
+<li><strong>Sample.</strong> <code>height(x:y:config:)</code> runs the layered noise
+pipeline (continent → warp → detail → mountains → rivers → coastal shelf) and returns
+a normalized height in <code>0…1</code>. <code>generateChunk(at:)</code> samples a full
+grid. Pure function of <code>(seed, config)</code>.</li>
+<li><strong>Mesh.</strong> The grid becomes indexed triangles: positions from
+<code>worldY(forHeight:)</code>, normals from central differences of the heightfield
+(border vertices sample the <em>true neighbor</em> via <code>world.heightAt</code> so
+adjacent chunks compute identical edge normals), colors from biome lookup with border
+blending and slope-based cliffs. Vertical skirts hang off every border so the world
+reads as a solid block.</li>
+<li><strong>Stream.</strong> <code>update(cameraTarget:)</code> computes the needed
+chunk square, evicts out-of-range chunks (keeping a one-chunk safety ring briefly),
+and dispatches missing builds nearest-first to a background queue. Finished meshes are
+installed under a lock; <code>draw</code> never blocks on a build.</li>
+<li><strong>Shade.</strong> Per frame: skybox first (fullscreen triangle, no depth
+write), then frustum-culled chunks (one draw each), structures (one instanced draw per
+kind), water (blended, last). The fragment shader does biome lighting, per-pixel bump,
+specular/fresnel (if enabled), analytic shadows (+ ray-traced on M3 builds), fog, and
+the optional wireframe overlay.</li>
+</ol>
+
+<h2>Threading model</h2>
+<table>
+<thead><tr><th>What</th><th>Where</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Chunk mesh building</td><td><code>com.MetalTerrain.meshBuild</code> (.userInitiated, concurrent)</td>
+<td>Builds are stamped with <code>buildGeneration</code>; stale ones self-drop.</td></tr>
+<tr><td>Structure placement queries</td><td>Same build queue</td>
+<td><code>world.structures(in:)</code> per visible chunk.</td></tr>
+<tr><td>Instance buffer swap</td><td>Main queue</td><td>Placement on build queue, swap on main.</td></tr>
+<tr><td>Chunk cache</td><td>Guarded by <code>NSLock</code> (<code>cacheLock</code>)</td>
+<td>Read by draw, written by build completions.</td></tr>
+<tr><td><code>update</code> / <code>draw</code></td><td>Render thread (via <code>onFrame</code>)</td>
+<td><code>draw</code> never waits for builds.</td></tr>
+<tr><td>Uniform buffers</td><td>Triple-buffered + semaphore(3)</td>
+<td>CPU never overwrites a slot the GPU is reading.</td></tr>
+<tr><td>TLAS refresh (M3)</td><td>Render thread, throttled to every 15 frames</td>
+<td>Skipped when the chunk set is unchanged.</td></tr>
+</tbody>
+</table>
+<div class="callout"><p><strong>The one rule:</strong> <code>draw</code> only ever
+renders <em>finished</em> meshes. The visible set grows/shrinks by completed builds —
+there is no code path where the render thread waits on generation. That's what keeps
+the frame rate smooth while the world streams in around you.</p></div>
+
+<h2>Why the library owns all the Metal</h2>
+<p>The founding rule (from the project's first week): <strong>the library owns
+pipelines, shaders, LOD, streaming, and Metal state; the app owns camera, input, and
+UI.</strong> Consequences:</p>
+<ul>
+<li>Apps can't break rendering by misconfiguring Metal state — there is no Metal state
+for apps to configure.</li>
+<li>Bug fixes to streaming or shading land in one place and benefit every app.</li>
+<li>The <code>overlay</code> closure on <code>draw(in:overlay:)</code> is the
+<em>only</em> sanctioned way for apps to inject custom drawing — inside the library's
+render pass, with the library's encoder state managed around it.</li>
+<li>Camera control stays in the app because <em>feel</em> is app-specific (orbit vs.
+walk vs. cinematic rails), while <em>rendering</em> is not.</li>
+</ul>
+
+<h2>Key invariants (for contributors)</h2>
+<ul>
+<li><strong>Determinism:</strong> same <code>(seed, config)</code> → same heights,
+biomes, chunks, structures, on every device, every run.</li>
+<li><strong>No I/O in generation:</strong> no files, no network, no
+<code>SystemRandomNumberGenerator</code>, no <code>Date</code> in the noise path.</li>
+<li><strong>Vertex layout:</strong> <code>MTVertex</code> is 3× <code>SIMD4</code>
+(48 bytes) — never <code>SIMD3</code>, because Swift pads it to 16 bytes while Metal
+packs <code>float3</code> as 12.</li>
+<li><strong>Winding:</strong> counter-clockwise seen from outside (from +Y for
+terrain). The terrain comment "was clockwise → terrain invisible from above" is
+preserved as a warning.</li>
+<li><strong>Water is flat.</strong> Geometric displacement never touches water
+vertices; water animation is fragment-shader only. (A hard requirement from real
+usage: waves must not move the shoreline.)</li>
+<li><strong>Leak review:</strong> every closure/async addition gets reviewed for
+retain cycles and buffer/cache leaks — a standing project rule.</li>
+</ul>
+
+<h2>File guide (where to look)</h2>
+<table>
+<thead><tr><th>I want to…</th><th>Look at</th></tr></thead>
+<tbody>
+<tr><td>Change how mountains form</td><td><code>Noise/MTNoise.swift</code> — the layer pipeline</td></tr>
+<tr><td>Add a biome</td><td><code>Core/MTBiome.swift</code> (+ <code>MTTerrainWorld.setBiome</code>)</td></tr>
+<tr><td>Change chunk size/count</td><td><code>Core/MTConfig.swift</code> + <code>Rendering/MTTerrainRenderer.update</code></td></tr>
+<tr><td>Fix a mesh seam</td><td><code>Rendering/MTMeshBuilder.swift</code> — borders, normals, skirts</td></tr>
+<tr><td>Change the lighting model</td><td><code>Rendering/MTShaders.metal</code></td></tr>
+<tr><td>Add a structure kind</td><td><code>Structures/MTStructures.swift</code> (+ placement in world)</td></tr>
+<tr><td>Debug streaming</td><td><code>Rendering/MTTerrainRenderer.swift</code> — <code>update</code>, eviction, <code>buildGeneration</code></td></tr>
+</tbody>
+</table>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

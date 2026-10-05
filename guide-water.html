@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Water Rendering — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain water: the flat-plane contract, draw order, grid snapping, and shoreline system.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Water Rendering</h1>
+<p class="lead">A single flat plane at sea level, animated entirely in the fragment
+shader. The geometry never moves — that's a deliberate, load-bearing design decision.</p>
+
+<h2>The flat-plane contract</h2>
+<div class="callout"><p><strong>Water is a constant, flat physical plane at sea
+level.</strong> It shows wherever terrain dips below it. The animated appearance lives
+<strong>only in the fragment-shader texture</strong> — the triangles never move. No
+foam, no shoreline effects, no geometric waves. This contract exists because moving
+water vertices causes shoreline glitching and z-fighting where water meets terrain.</p></div>
+<ul>
+<li><strong>Geometry:</strong> <code>MTMeshBuilder.buildWaterMesh(size:level:)</code>
+builds a flat 64×64-segment plane centered on the XZ origin. 64 segments is the
+locked value.</li>
+<li><strong>Level:</strong> <code>worldY(forHeight: config.seaLevel)</code> — the same
+sea level the terrain and biome logic use, so shorelines agree everywhere.</li>
+<li><strong>Size:</strong> <code>(viewDistance × 2 + 4) × chunkWorldSize</code>,
+rebuilt when the config changes.</li>
+<li><strong>Position:</strong> recentered under the camera target every frame via the
+model matrix, <strong>snapped to a grid</strong> of <code>waterSize / 64</code> so
+vertices sit at stable world positions — this is what prevents shoreline
+swimming/jitter as the camera moves.</li>
+</ul>
+
+<h2>Draw order and blending</h2>
+<p>Water is drawn <strong>last</strong>, after skybox, terrain, and structures:
+blended (<code>waterAlpha</code> = 0.82, fixed), depth-tested but with <strong>no depth
+write</strong>. That ordering means:</p>
+<ul>
+<li>Terrain above sea level correctly occludes water (depth test).</li>
+<li>Water doesn't occlude things drawn after it (nothing is — it's last, except your
+<code>overlay</code>).</li>
+<li>The sea floor shows through shallow water — that's the <code>ocean</code>/
+<code>beach</code> biome colors doing their job, not transparency trickery.</li>
+</ul>
+
+<h2>The animated texture</h2>
+<p>What <em>does</em> move is the fragment-shader water texture: layered procedural
+waves and sun glints, all computed per-pixel from world position and time. Because
+it's a pure function of <code>(worldXZ, time)</code>, the animation is stable — no
+swimming, no tiling artifacts, no texture memory.</p>
+
+<h2>API</h2>
+<pre><code class="language-swift">// Toggle water rendering:
+renderer.showsWater = true
+terrainView.showsWater = false   // forwarded to the renderer
+
+// Water color (linear RGB) and sea level live in the world config:
+var config = MTTerrainConfig.default
+config.waterColor = SIMD3&lt;Float&gt;(0.05, 0.30, 0.55)  // linear, not sRGB
+config.seaLevel = 0.45                              // normalized 0...1
+world.config = config   // rebuilds the water plane
+
+// Gameplay: &quot;can the player be here?&quot; — water blocking:
+func isLand(_ p: SIMD2&lt;Float&gt;, world: MTTerrainWorld) -&gt; Bool {
+    world.heightAt(x: Double(p.x), z: Double(p.y)) &gt;= world.config.seaLevel
+}
+</code></pre>
+<h2>Shorelines</h2>
+<p>Shorelines emerge from three systems agreeing on one number
+(<code>seaLevel</code> = 0.45):</p>
+<ol>
+<li>The <strong>heightfield</strong> flattens toward a coastal shelf near sea level,
+so beaches read as beaches.</li>
+<li>The <strong>biome ladder</strong> has a dedicated <code>beach</code> band
+(0.40–0.52) overlapping the top of <code>ocean</code>.</li>
+<li>The <strong>water plane</strong> sits exactly at sea level, grid-snapped so the
+waterline doesn't crawl as you move.</li>
+</ol>
+<p>If you change <code>seaLevel</code>, all three follow — but re-verify beach width on
+a few seeds, since the shelf flattening is tuned around 0.45.</p>
+
+<h2>What not to do</h2>
+<ul>
+<li><strong>Don't displace water vertices.</strong> Ever. It breaks the shoreline.</li>
+<li><strong>Don't add foam</strong> unless the requirement changes — it's an explicit
+non-goal (it was tried and removed).</li>
+<li><strong>Don't raymarch the water.</strong> The flat plane + fragment texture is
+the whole technique; it's cheap and it looks right.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

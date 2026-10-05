@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -141,6 +149,119 @@ the final look is the blend of the two.</p>
 <li><strong>Structures avoid some biomes</strong> — placement keeps to land between beach top and snow.</li>
 <li><strong>Name discipline:</strong> <code>"SnowyPeak"</code> ≠ <code>"snowyPeak"</code>. Reuse exact built-in names when overriding.</li>
 </ul>
+
+
+<h2>The built-in biome ladder</h2>
+<p>Seven biomes, keyed on normalized height. Lookup is <strong>first match in array
+order</strong> — bands may overlap, and the earlier entry wins. Note the deliberate
+<code>ocean</code>/<code>beach</code> overlap at 0.40–0.45: heights just above sea level
+(0.45) read as beach, giving a natural shoreline band.</p>
+<table>
+<thead><tr><th>Name</th><th>Height band</th><th>Ground color</th><th>Slope color</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>deepOcean</code></td><td>0.00 – 0.32</td><td>(0.02, 0.12, 0.30)</td><td>—</td><td>Never visible (under the water plane)</td></tr>
+<tr><td><code>ocean</code></td><td>0.32 – 0.45</td><td>(0.05, 0.28, 0.55)</td><td>—</td><td>Sea floor near shores</td></tr>
+<tr><td><code>beach</code></td><td>0.40 – 0.52</td><td>(0.85, 0.75, 0.55)</td><td>—</td><td>Overlaps ocean; wins above 0.40</td></tr>
+<tr><td><code>grass</code></td><td>0.52 – 0.62</td><td>(0.25, 0.55, 0.20)</td><td>—</td><td>Plains and valleys</td></tr>
+<tr><td><code>forest</code></td><td>0.62 – 0.72</td><td>(0.12, 0.38, 0.12)</td><td>—</td><td>Darker green foothills</td></tr>
+<tr><td><code>mountain</code></td><td>0.72 – 0.80</td><td>(0.45, 0.42, 0.38)</td><td>(0.32, 0.30, 0.28)</td><td>Rock; cliffs go darker</td></tr>
+<tr><td><code>snowyPeak</code></td><td>0.80 – 1.00</td><td>(0.90, 0.92, 0.95)</td><td>(0.55, 0.56, 0.58)</td><td>Snow; steep faces expose rock</td></tr>
+</tbody>
+</table>
+<p>Colors are <strong>linear RGB</strong> in <code>0…1</code>, not sRGB. If you're picking
+colors from a design tool, convert: <code>linear = pow(srgb, 2.2)</code> approximately.
+Getting this wrong makes everything look washed out or muddy.</p>
+
+<h2>How lookup works</h2>
+<pre><code class="language-swift">let biome = world.biomeAt(height: h)  // h in 0...1, clamped automatically
+
+// What happens inside (simplified):
+// 1. Custom biomes first, in the order you added them (setBiome)
+// 2. Then config.biomes (the built-in ladder, unless you replaced it)
+// 3. First biome with minHeight &lt;= h &lt; maxHeight wins
+// 4. If NOTHING matches (empty lists), you get a flat-gray &quot;void&quot; biome —
+//    a safety net, not a feature. Don&#x27;t rely on it.
+</code></pre>
+<div class="callout"><p><strong>Custom biomes take precedence.</strong>
+<code>world.setBiome(_:)</code> inserts into a custom list consulted <em>before</em>
+<code>config.biomes</code>. To override grass, add a custom biome named
+<code>"grass"</code> with your band — it shadows the built-in. To start over,
+<code>world.resetBiomesToDefault()</code> clears customs.</p></div>
+
+<h2>Authoring custom biomes</h2>
+<h3>Example: volcanic badlands</h3>
+<pre><code class="language-swift">// Ashen flats where grass used to be, lava veins on steep slopes
+world.setBiome(MTBiome(
+    name: &quot;ashenFlats&quot;,
+    minHeight: 0.52, maxHeight: 0.66,
+    groundColor: SIMD3&lt;Float&gt;(0.23, 0.20, 0.19),   // dark ash, linear RGB
+    slopeColor: SIMD3&lt;Float&gt;(0.85, 0.25, 0.05)))   // glowing lava on cliffs
+
+// A lava biome that actually emits light (bloom-ish in the shader)
+world.setBiome(MTBiome(
+    name: &quot;lava&quot;,
+    minHeight: 0.44, maxHeight: 0.48,
+    groundColor: SIMD3&lt;Float&gt;(1.0, 0.30, 0.05),
+    emitsLight: true))
+</code></pre>
+<h3>Example: desert planet (replace the whole ladder)</h3>
+<pre><code class="language-swift">var config = MTTerrainConfig.default
+config.seaLevel = 0.38
+config.biomes = [
+    MTBiome(name: &quot;deepOcean&quot;, minHeight: 0.00, maxHeight: 0.30,
+            groundColor: SIMD3&lt;Float&gt;(0.02, 0.10, 0.25)),
+    MTBiome(name: &quot;ocean&quot;,     minHeight: 0.30, maxHeight: 0.38,
+            groundColor: SIMD3&lt;Float&gt;(0.05, 0.25, 0.50)),
+    MTBiome(name: &quot;dunes&quot;,     minHeight: 0.38, maxHeight: 0.62,
+            groundColor: SIMD3&lt;Float&gt;(0.85, 0.65, 0.35)),
+    MTBiome(name: &quot;rock&quot;,      minHeight: 0.62, maxHeight: 0.80,
+            groundColor: SIMD3&lt;Float&gt;(0.55, 0.35, 0.22),
+            slopeColor:  SIMD3&lt;Float&gt;(0.40, 0.25, 0.16)),
+    MTBiome(name: &quot;peaks&quot;,     minHeight: 0.80, maxHeight: 1.00,
+            groundColor: SIMD3&lt;Float&gt;(0.75, 0.55, 0.40)),
+]
+world.config = config   // bumps configVersion → renderer rebuilds
+</code></pre>
+<h2>Slope coloring (cliffs)</h2>
+<p>When a biome sets <code>slopeColor</code>, steep faces use it instead of
+<code>groundColor</code>. The shader blends by slope angle, so you get natural
+transitions: grassy hillsides that turn to exposed rock on cliffs, snowy peaks with
+rocky faces. Only <code>mountain</code> and <code>snowyPeak</code> set it by default.</p>
+<p>Tip: if your mountains look "banded" (striped by height), that's the biome bands
+showing through on steep terrain. Widening the mountain band or strengthening the
+slope blend fixes it — the shader already forces rock above ~0.65 height on steep
+slopes.</p>
+
+<h2>Biome edges and blending</h2>
+<p>Vertex colors are computed per-vertex from the height at that vertex, so biome
+boundaries naturally anti-alias across triangles. Near a boundary the color is blended
+toward the neighboring biome, which is why shorelines look soft rather than pixelated.
+At 250-vertex chunk resolution, bands narrower than ~0.02 in height can shimmer —
+keep functional bands at least that wide.</p>
+
+<h2>Best practices</h2>
+<ul>
+<li><strong>Keep bands ordered and non-overlapping</strong> unless you specifically want
+first-match-wins behavior (like the ocean/beach shoreline trick).</li>
+<li><strong>Mind the sea level.</strong> Anything below <code>config.seaLevel</code>
+(0.45) is underwater — its color only shows through shallow water or on the sea floor
+at the water's edge.</li>
+<li><strong>Test with several seeds.</strong> A band that looks great on seed 1337 might
+never appear on a flatter seed. <code>findSafeSpawn()</code> plus a quick flyover on
+3–4 seeds is the minimum.</li>
+<li><strong>Changing biomes is cheap; changing noise is not.</strong> Biome edits only
+recolor vertices (fast rebuild). Noise/config edits regenerate heightfields (slower).
+Iterate on color first, shape second.</li>
+<li><strong>Name biomes semantically</strong> (<code>"grass"</code>, not
+<code>"band3"</code>) — <code>setBiome</code> replaces by name, so good names make
+overrides predictable.</li>
+</ul>
+
+<h2>Removing and resetting</h2>
+<pre><code class="language-swift">world.removeBiome(named: &quot;ashenFlats&quot;)  // built-ins are unaffected
+world.resetBiomesToDefault()             // clear ALL customs, restore ladder
+world.allBiomes  // the exact lookup order biomeAt consults (customs first)
+</code></pre>
 
   </main>
 </div>

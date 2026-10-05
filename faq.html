@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAQ &amp; Troubleshooting — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain FAQ and troubleshooting: setup, world shape, rendering, performance, API confusion.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>FAQ &amp; Troubleshooting</h1>
+<p class="lead">The questions that come up in every integration, and the fixes that
+actually work.</p>
+
+<h2>Setup</h2>
+<h3>Black screen, but the app runs and FPS is nonzero</h3>
+<ul>
+<li>Is <code>world</code> assigned to the view/renderer? Nil world renders nothing.</li>
+<li>Is <code>setCamera</code> called every frame? Breakpoint your <code>onFrame</code>.</li>
+<li>Is the camera <em>under</em> the terrain? Print eye Y vs.
+<code>world.worldY(forHeight: world.heightAt(x:z:))</code>.</li>
+<li>Metal API Validation (scheme settings) will surface pipeline/encoder errors in the
+console.</li>
+</ul>
+<h3>"No such module 'MetalTerrain'"</h3>
+<p>The package isn't linked to your app target. Xcode: app target → General →
+Frameworks, Libraries, and Embedded Content → add MetalTerrain. For SwiftPM apps,
+check the <code>dependencies</code> array in <code>Package.swift</code>.</p>
+<h3>It works on device but crawls in the simulator</h3>
+<p>Normal. The simulator has no GPU; Metal runs on the CPU. Judge performance only on
+physical devices.</p>
+
+<h2>World shape</h2>
+<h3>My spawn point is in the ocean</h3>
+<p>Use <code>world.findSafeSpawn()</code> — it spiral-searches for land above sea
+level and below the peaks. Don't hand-pick coordinates; every seed is different.</p>
+<h3>There are no mountains / too many mountains</h3>
+<p>Mountains come from the masked ridged layer (~35% of land), not from
+<code>noise.ridged</code> alone. For dramatic ranges: <code>noise.ridged = true</code>
++ higher <code>octaves</code>. For farmland: leave <code>ridged</code> off and lower
+<code>gain</code>. Always check 3–4 seeds — one seed is never representative.</p>
+<h3>Rivers don't reach the ocean</h3>
+<p>Rivers carve toward sea level and are masked to land. If a river dies inland, the
+local terrain rose above the carve depth — usually a seed with weak continent relief.
+Try <code>baseFrequency</code> slightly lower (broader landmasses) or a new seed.</p>
+<h3>The terrain looks "banded" on mountainsides</h3>
+<p>Biome height bands showing through on steep slopes. The shader already forces rock
+above ~0.65 height and blends to snow above 0.80; if you customized biomes, make sure
+your mountain band is wide enough and <code>slopeColor</code> is set.</p>
+
+<h2>Rendering</h2>
+<h3>Seams / cracks between chunks</h3>
+<p>Should not happen in current versions: skirts cover geometric gaps, border normals
+use true neighbor heights (no lighting seams), and a +1 safety ring prevents eviction
+holes. If you see a crack: note the seed, camera position, and viewDistance — it's a
+bug, and those three reproduce it.</p>
+<h3>Shoreline "swimming" when I move</h3>
+<p>The water plane is grid-snapped to prevent exactly this. If the waterline crawls,
+you're likely moving the water level per frame (don't — it's derived from
+<code>seaLevel</code>) or your camera far plane is fighting depth precision.</p>
+<h3>Structures look inside-out</h3>
+<p>Fixed in current versions: structures render double-sided (<code>.none</code> cull
+mode) because generated low-poly triangles occasionally have inconsistent winding.</p>
+<h3>Shadows look wrong / missing on M3</h3>
+<p>Ray-traced shadows need <strong>both</strong> the <code>M3_FEATURES</code> build
+flag <strong>and</strong> M3+/A17 Pro+ hardware. Check
+<code>terrainView.rayTracingActive</code> at runtime — if false, you're on the analytic
+path (which is correct and complete on its own).</p>
+<h3>FPS drops when I drag a slider</h3>
+<p>You're doing expensive work per tick. Sliders should update uniforms/values every
+frame but defer rebuilds: debounce buttons (1.5 s), coalesce config changes, and
+never set <code>world.config</code> per frame — each set bumps
+<code>configVersion</code> and invalidates all caches.</p>
+
+<h2>Performance</h2>
+<h3>How do I hit 60 fps on older devices?</h3>
+<p>In order: lower <code>viewDistance</code> (quadratic win), lower
+<code>chunkResolution</code>, set <code>detailAmount = 0</code>, then consider
+<code>octaves = 3</code> + <code>warpStrength = 0</code> in the noise config. See the
+<a href="guide-performance.html">Performance</a> guide's per-device table.</p>
+<h3>Memory warnings with large viewDistance</h3>
+<p>Full-res chunks are ~4.6 MB GPU-side each. At viewDistance 10 that's 441 chunks
+before culling. The LRU cap bounds it, but if you're still pressured, viewDistance 8
+is the practical max on 4 GB devices.</p>
+<h3>Occasional hitch while flying fast</h3>
+<p>Chunk streaming saturating the build queue, or a TLAS refresh on M3 builds (throttled
+to every 15 frames). If it reproduces reliably, capture which: hitches that correlate
+with <em>movement</em> are streaming; hitches at rest are something else (profile with
+the Metal debugger).</p>
+
+<h2>API confusion</h2>
+<h3>MTTerrainView vs MTTerrainRenderer — which one?</h3>
+<p><code>MTTerrainView</code> for 95% of apps: drop it in, assign a world, drive the
+camera. <code>MTTerrainRenderer</code> when you need your own <code>MTKView</code>,
+offscreen rendering, or the <code>overlay</code> closure for custom draws (cars,
+markers, gizmos) in the same render pass.</p>
+<h3>Where do I put game objects (player, car, enemies)?</h3>
+<p>In the <code>overlay</code> closure of <code>renderer.draw(in:overlay:)</code> —
+same encoder, same pass, no sync bugs. <code>MTTerrainView</code> doesn't expose the
+overlay; use the raw renderer for that.</p>
+<h3>How do I save/load the world?</h3>
+<p>Save the <strong>seed</strong> (and the config, if customized). That's the entire
+world — regeneration is deterministic. There is no serialization format because
+there's nothing to serialize.</p>
+<h3>Can two players share a world?</h3>
+<p>Yes — send the seed + config once. Both devices generate bit-identical terrain
+locally. Only gameplay state (positions, inventory) needs networking.</p>
+<h3>Do I need to handle memory warnings?</h3>
+<p>The renderer's LRU cache already bounds GPU memory. On
+<code>didReceiveMemoryWarning</code> you can drop <code>viewDistance</code> a notch;
+streaming refills as needed.</p>
+
+<h2>Still stuck?</h2>
+<ul>
+<li>Reproduce with a <strong>seed + config + camera position</strong> — determinism
+means your bug report is a complete repro.</li>
+<li>Capture a frame with Xcode's Metal debugger for rendering issues.</li>
+<li>File issues at
+<a href="https://github.com/a-user-of-python/MetalTerrain">github.com/a-user-of-python/MetalTerrain</a>.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

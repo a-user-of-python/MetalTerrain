@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Advanced Features — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain advanced features: wireframe, procedural detail, ray tracing, mesh shading, skybox, reflections.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Advanced Features</h1>
+<p class="lead">The eye candy and power tools: smooth wireframe, procedural 3D detail,
+hardware ray tracing, mesh shading, skybox, and real-time reflections — what each one
+is, what it costs, and when to use it.</p>
+
+<h2>Smooth animated wireframe</h2>
+<p><strong>Property:</strong> <code>renderer.wireframe: Bool</code> (default
+<code>false</code>) · <code>terrainView.wireframe</code> (forwarded)</p>
+<p>Unlike traditional wireframe modes that draw raw triangle edges (the "Lego" look),
+MetalTerrain renders a smooth animated overlay in the fragment shader:</p>
+<ul>
+<li><strong>Contour lines</strong> — smooth iso-height bands that flow across the
+surface, following the actual geometry rather than the triangulation.</li>
+<li><strong>Grid overlay</strong> — a subtle world-aligned grid, anti-aliased with
+screen-space derivatives (<code>fwidth</code>) for crisp lines at any distance.</li>
+<li><strong>Animated pulse</strong> — a wave radiates from the camera, brightening
+lines as it passes: the "scanning" effect.</li>
+<li><strong>Distance fade</strong> — lines fade beyond ~800 units to prevent distant
+shimmer.</li>
+</ul>
+<p>Implemented in both <code>terrain_fragment</code> and
+<code>mesh_terrain_fragment</code>, so it works on all devices with or without mesh
+shading.</p>
+<pre><code class="language-swift">renderer.wireframe = true   // the scan effect
+terrainView.wireframe = true  // same, via the view
+</code></pre>
+<p><strong>Use cases:</strong> debugging terrain generation (see the actual heightfield
+structure), visualizing LOD transitions, hologram/scan aesthetics.</p>
+
+<h2>Procedural 3D geometric detail</h2>
+<p><strong>Property:</strong> <code>renderer.detailAmount: Float</code> (default
+<code>1.0</code>, range <code>0…1</code>)</p>
+<p>Real geometric displacement — not coloring, not normal mapping. Vertices are
+physically moved along their normals by material-specific procedural noise, giving
+true 3D texture visible even at grazing angles:</p>
+<table>
+<thead><tr><th>Material</th><th>Effect</th><th>Amplitude</th><th>Frequency</th></tr></thead>
+<tbody>
+<tr><td>Grass (0)</td><td>Tufty bumps</td><td>0.9</td><td>0.55</td></tr>
+<tr><td>Rock (1)</td><td>Craggy displacement</td><td>1.6</td><td>0.35</td></tr>
+<tr><td>Sand (2)</td><td>Fine ripples</td><td>0.35</td><td>1.4</td></tr>
+<tr><td>Snow (3, 4)</td><td>Soft drifts</td><td>0.5</td><td>0.22</td></tr>
+<tr><td>Water (5)</td><td>None — stays flat</td><td>0</td><td>—</td></tr>
+</tbody>
+</table>
+<p><strong>How it works:</strong> on the mesh-shader path (M3+), the mesh shader
+displaces vertices as it emits them with 2-octave value noise, perturbing normals by
+the noise gradient so lighting follows the bumps. On the standard path, the vertex
+shader applies the identical displacement — visual parity everywhere. The noise is a
+deterministic function of world position, so detail never swims or flickers as the
+camera moves.</p>
+<p><strong>Performance:</strong> per-vertex, not per-pixel — cheap.
+<code>detailAmount = 0</code> disables it for maximum performance on older devices.
+<strong>Water never displaces</strong> — the plane must stay perfectly flat or the
+shoreline glitches.</p>
+<pre><code class="language-swift">renderer.detailAmount = 1.0  // full (default)
+renderer.detailAmount = 0.5  // half
+renderer.detailAmount = 0.0  // off — flat shading, fastest
+</code></pre>
+<h2>Hardware ray tracing</h2>
+<p><strong>Build flag:</strong> <code>M3_FEATURES</code> (Swift and Metal) ·
+<strong>Runtime check:</strong>
+<code>MTCapabilities.supportsHardwareRayTracing(device:)</code></p>
+<p>One BLAS per terrain chunk (cached by chunk ID) plus one TLAS instancing every
+visible chunk. The <code>terrain_fragment_rt</code> pipeline traces sun rays against
+the TLAS at fragment buffer index 3. <strong>Subtle by design</strong> — it enhances
+the analytic shadows rather than replacing them. Falls back automatically without the
+flag or the hardware. <strong>No software fallback exists, deliberately.</strong></p>
+<p>Full details: <a href="guide-raytracing.html">Ray Tracing</a>.</p>
+
+<h2>Mesh shading</h2>
+<p><strong>Build flag:</strong> <code>M3_FEATURES</code> · <strong>Runtime
+check:</strong> <code>MTCapabilities.supportsMeshShading(device:)</code></p>
+<p>Terrain generated entirely on the GPU: the object shader culls per chunk and sizes
+the dispatch by LOD; the mesh shader emits one 8×8-quad tile per threadgroup;
+<code>mesh_terrain_fragment</code> is pixel-identical to the standard fragment shader.
+Falls back silently; the mesh pipeline compiles asynchronously so there's no startup
+hitch.</p>
+<p>Full details: <a href="guide-meshshading.html">Mesh Shading</a>.</p>
+<pre><code class="language-swift">// M3_FEATURES builds only:
+terrainView.meshShadingEnabled = true   // default; false forces standard path
+</code></pre>
+<h2>Skybox with visible sun</h2>
+<p><strong>Property:</strong> <code>renderer.skybox: MTSkybox?</code> (created by
+default; set <code>nil</code> to disable)</p>
+<p>One fullscreen triangle: gradient horizon→zenith, warm tint near the sun, visible
+sun disc, stars at night (negative elevation). The sun uses the same
+azimuth/elevation → direction mapping as the terrain lighting — disc and light always
+agree. The renderer mirrors <code>sunAzimuth</code>/<code>sunElevation</code> into the
+skybox automatically.</p>
+<p>Full details: <a href="guide-skybox.html">Skybox</a>.</p>
+
+<h2>Real-time reflections</h2>
+<p><strong>Method:</strong>
+<code>renderer.renderReflection(to:from:lookingAt:fovDegrees:)</code></p>
+<p>Renders skybox + terrain into an offscreen texture from an arbitrary camera —
+built for mirror reflections, available for any app-level effect:</p>
+<pre><code class="language-swift">// 256x128 is plenty for a mirror
+let desc = MTLTextureDescriptor.texture2DDescriptor(
+    pixelFormat: .bgra8Unorm, width: 256, height: 128, mipmapped: false)
+desc.usage = [.renderTarget, .shaderRead]
+desc.storageMode = .private
+let reflectionTex = device.makeTexture(descriptor: desc)!
+
+renderer.renderReflection(to: reflectionTex,
+                          from: carPosition + SIMD3&lt;Float&gt;(0, 4, 0),
+                          lookingAt: carPosition - forward * 50)
+</code></pre>
+<ul>
+<li>Structures and water are <strong>skipped</strong> in reflection passes (small in
+mirrors anyway).</li>
+<li>Uses a <strong>dedicated uniform slot</strong> beyond the frame slots — main
+render state is undisturbed.</li>
+<li><strong>Synchronous</strong> (<code>waitUntilCompleted</code>) — call at most once
+per frame, with a small texture.</li>
+</ul>
+
+<h2>Shader effects (specular + fresnel)</h2>
+<p><strong>Property:</strong> <code>renderer.shaderEffectsEnabled: Bool</code>
+(default <code>false</code>)</p>
+<p>Per-material specular response: rock dull, sand matte, grass slight sheen, snow a
+soft glow, water mirror-like. Fresnel rim at grazing angles. Off by default — the
+base look is deliberately non-shiny; enable it when you want wet/glossy materials.</p>
+
+<h2>Putting it all together</h2>
+<pre><code class="language-swift">import MetalTerrain
+
+let renderer = MTTerrainRenderer(device: device, world: world)
+
+// Eye candy (M3+ device + M3_FEATURES build for the RT/mesh-shader lines)
+renderer.wireframe = false            // true for the scan effect
+renderer.detailAmount = 1.0            // full procedural 3D detail
+renderer.shaderEffectsEnabled = true   // specular + fresnel
+// Ray-traced shadows + mesh shading engage automatically when available.
+
+// Per frame
+renderer.setCamera(position: camPos, target: camTarget,
+                   fovDegrees: 55, aspect: aspect, near: 1, far: 4000)
+renderer.update(cameraTarget: SIMD2&lt;Float&gt;(camTarget.x, camTarget.z))
+renderer.draw(in: view)
+</code></pre>
+<h2>Feature matrix</h2>
+<table>
+<thead><tr><th>Feature</th><th>Standard build</th><th>M3_FEATURES, older HW</th><th>M3_FEATURES, M3+ HW</th></tr></thead>
+<tbody>
+<tr><td>Smooth wireframe</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Procedural 3D detail</td><td>✅ (vertex shader)</td><td>✅ (vertex shader)</td><td>✅ (mesh shader)</td></tr>
+<tr><td>Skybox + sun</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Analytic shadows</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Ray-traced shadows</td><td>❌</td><td>❌ (falls back)</td><td>✅</td></tr>
+<tr><td>Mesh shading</td><td>❌</td><td>❌ (falls back)</td><td>✅</td></tr>
+<tr><td>Reflections API</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Shader effects</td><td>✅</td><td>✅</td><td>✅</td></tr>
+</tbody>
+</table>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>

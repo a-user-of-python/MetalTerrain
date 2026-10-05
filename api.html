@@ -18,18 +18,26 @@
 <nav><ul>
 <li><a href="index.html">Home</a></li>
 <li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
 <li><a href="api.html">API Reference</a></li>
 <li class="nav-section">Guides</li>
 <li><ul class="nav-sub">
 <li><a href="guide-biomes.html">Biome Authoring</a></li>
 <li><a href="guide-noise.html">Noise Tuning</a></li>
 <li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
 <li><a href="guide-raytracing.html">Ray Tracing</a></li>
 <li><a href="guide-meshshading.html">Mesh Shading</a></li>
 <li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
 </ul></li>
 <li><a href="chip-support.html">Chip Support</a></li>
 <li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
 </ul></nav>
   </aside>
   <main class="content">
@@ -309,6 +317,335 @@ drawn with a single instanced draw call per kind.</p>
 }</code></pre>
 <p><code>position.y</code> is already world-space terrain height — drop the transform straight into your scene.</p>
 </div>
+
+
+<h2>MTTerrainWorld</h2>
+<p><code>public final class MTTerrainWorld</code> — the seeded infinite heightmap world.
+All state is thread-safe via internal locks; <code>config</code> and <code>seed</code>
+are safe to read/write from any thread. Setting <code>config</code> bumps
+<code>configVersion</code>, which renderers snapshot to invalidate their caches.</p>
+<pre><code class="language-swift">public init(seed: UInt64, config: MTTerrainConfig = .default)
+
+// Properties
+public var config: MTTerrainConfig        // set → configVersion += 1
+public var seed: UInt64
+public var configVersion: UInt64          // read-only; cache invalidation token
+public var structuresEnabled: Bool        // live alias for config.structuresEnabled
+public var allBiomes: [MTBiome]           // customs first, then config.biomes
+
+// Queries — all pure functions of (seed, config)
+public func heightAt(x: Double, z: Double) -&gt; Float        // normalized 0...1
+public func worldY(forHeight h: Float) -&gt; Float           // h * config.heightScale
+public func findSafeSpawn() -&gt; SIMD2&lt;Float&gt;               // land above sea, below peaks
+public func biomeAt(height: Float) -&gt; MTBiome
+public func generateChunk(at coord: MTChunkCoord,
+                          resolutionScale: Float = 1) -&gt; MTChunk
+public func structures(in coord: MTChunkCoord) -&gt; [MTStructurePlacement]
+
+// Biome management
+public func setBiome(_ biome: MTBiome)        // add or replace by name
+public func removeBiome(named name: String)   // built-ins unaffected
+public func resetBiomesToDefault()            // clear customs
+</code></pre>
+<h3>Determinism contract</h3>
+<p><code>heightAt</code>, <code>generateChunk</code>, <code>structures(in:)</code>,
+<code>biomeAt</code>, and <code>findSafeSpawn()</code> are pure functions of
+<code>(seed, config)</code>. No I/O, no unseeded randomness. Noise permutation tables
+are cached per seed (built once per seed change).</p>
+<h3>Structure placement policy</h3>
+<p>12 PRNG candidates per chunk from a chunk-seeded PRNG. A candidate is kept when the
+structure-density noise exceeds a <code>structureDensity</code>-derived threshold and
+the terrain height is in <code>[beachTop, 0.85]</code>; the kind comes from a second
+noise field mapped over the 7 kinds; rotation and scale come from the PRNG.
+<code>structuresEnabled == false</code> returns <code>[]</code>.</p>
+
+<h2>MTTerrainConfig</h2>
+<p><code>public struct MTTerrainConfig</code> — every tweakable. All fields are
+<code>public var</code>; the initializer clamps aggressively so you can't construct an
+invalid config.</p>
+<table>
+<thead><tr><th>Property</th><th>Type</th><th>Default</th><th>Clamp</th></tr></thead>
+<tbody>
+<tr><td><code>chunkResolution</code></td><td><code>Int</code></td><td><code>250</code></td><td>max(2, …)</td></tr>
+<tr><td><code>chunkWorldSize</code></td><td><code>Float</code></td><td><code>1000</code></td><td>max(1, …)</td></tr>
+<tr><td><code>viewDistance</code></td><td><code>Int</code></td><td><code>6</code></td><td>1…10</td></tr>
+<tr><td><code>seaLevel</code></td><td><code>Float</code></td><td><code>0.45</code></td><td>0…1</td></tr>
+<tr><td><code>heightScale</code></td><td><code>Float</code></td><td><code>400</code></td><td>max(1, …)</td></tr>
+<tr><td><code>biomes</code></td><td><code>[MTBiome]</code></td><td><code>MTBiome.default</code></td><td>—</td></tr>
+<tr><td><code>noise</code></td><td><code>MTNoiseConfig</code></td><td><code>MTNoiseConfig()</code></td><td>—</td></tr>
+<tr><td><code>structureNoise</code></td><td><code>MTNoiseConfig</code></td><td>seed 90210, 3 octaves, warp off</td><td>—</td></tr>
+<tr><td><code>structuresEnabled</code></td><td><code>Bool</code></td><td><code>true</code></td><td>—</td></tr>
+<tr><td><code>structureDensity</code></td><td><code>Float</code></td><td><code>0.35</code></td><td>0…1</td></tr>
+<tr><td><code>waterColor</code></td><td><code>SIMD3&lt;Float&gt;</code></td><td>(0.10, 0.35, 0.62) linear</td><td>—</td></tr>
+<tr><td><code>fogColor</code></td><td><code>SIMD3&lt;Float&gt;</code></td><td>(0.62, 0.74, 0.86) linear</td><td>—</td></tr>
+<tr><td><code>fogDensity</code></td><td><code>Float</code></td><td><code>0.0028</code></td><td>max(0, …)</td></tr>
+</tbody>
+</table>
+<div class="callout"><p><strong>Stale comments warning:</strong> the source comments on
+<code>chunkResolution</code> ("default 96"), <code>chunkWorldSize</code> ("default 128"),
+and <code>heightScale</code> ("default 60") are outdated. The initializer defaults in
+the table above are authoritative.</p></div>
+
+<h2>MTChunk &amp; MTChunkCoord</h2>
+<pre><code class="language-swift">public struct MTChunkCoord: Hashable, Comparable {
+    public var x: Int
+    public var z: Int
+    public init(x: Int, z: Int)
+    // Chunk (x, z) covers [x*chunkWorldSize, (x+1)*chunkWorldSize) on X and Z.
+}
+
+public struct MTChunk {
+    public var coord: MTChunkCoord
+    public var heights: [Float]   // resolution*resolution, row-major, 0...1
+    public var resolution: Int
+    public init(coord: MTChunkCoord, heights: [Float], resolution: Int)
+    public func height(ix: Int, iz: Int) -&gt; Float  // indices clamped to grid
+}
+</code></pre>
+<h2>MTBiome</h2>
+<pre><code class="language-swift">public struct MTBiome {
+    public var name: String
+    public var minHeight: Float       // normalized 0...1, inclusive
+    public var maxHeight: Float       // normalized 0...1, exclusive
+    public var groundColor: SIMD3&lt;Float&gt;   // linear RGB 0...1
+    public var slopeColor: SIMD3&lt;Float&gt;?  // steep-slope override (cliffs)
+    public var emitsLight: Bool           // e.g. lava
+    public init(name: String, minHeight: Float, maxHeight: Float,
+                groundColor: SIMD3&lt;Float&gt;, slopeColor: SIMD3&lt;Float&gt;? = nil,
+                emitsLight: Bool = false)
+}
+public static var `default`: [MTBiome]  // 7-biome ladder (see Biome Authoring)
+</code></pre>
+<h2>MTNoiseConfig &amp; samplers</h2>
+<pre><code class="language-swift">public struct MTNoiseConfig {
+    public init(seed: UInt64 = 1337, octaves: Int = 5,
+                baseFrequency: Double = 0.004, amplitude: Double = 1.0,
+                lacunarity: Double = 2.03, gain: Double = 0.42,
+                warpStrength: Double = 0.25, warpFrequency: Double = 0.015,
+                ridged: Bool = false)
+}
+// octaves clamped to 1...12. See Noise Tuning for what each knob does.
+
+public struct MTPerlinNoise {
+    public init(seed: UInt64)
+    public func noise(x: Double, y: Double) -&gt; Double  // [-1, 1]; NaN/inf → 0
+}
+public func fbm(_ config: MTNoiseConfig, x: Double, y: Double) -&gt; Double
+public func fbm(field config: MTNoiseConfig, x: Double, y: Double) -&gt; Double
+public func ridged(_ config: MTNoiseConfig, x: Double, y: Double) -&gt; Double
+public func height(x: Double, y: Double, config: MTNoiseConfig) -&gt; Float  // 0...1
+public struct MTSeededRandom {
+    public init(seed: UInt64)          // 0 maps to a fixed nonzero constant
+    public mutating func next() -&gt; UInt64
+    public mutating func nextDouble() -&gt; Double   // [0, 1)
+    public mutating func nextFloat() -&gt; Float     // [0, 1)
+    public mutating func nextInt(upperBound: Int) -&gt; Int
+}
+</code></pre>
+<h2>MTCapabilities</h2>
+<p><code>public enum MTCapabilities</code> — caseless namespace for pure GPU queries.
+Safe to call at startup and cache; they never change device state.</p>
+<pre><code class="language-swift">public static func supportsHardwareRayTracing(device: MTLDevice) -&gt; Bool
+// M3/M4/M5 (all variants), A17 Pro, A18/A18 Pro, A19/A19 Pro+. NOT M1/M2/A16-.
+public static func supportsMeshShading(device: MTLDevice) -&gt; Bool
+// Apple GPU family 9+ (M3/M4/M5, A17 Pro+).
+// Both gate on #available(iOS 17, macOS 14, *); older OS/SDK → conservatively false.
+</code></pre>
+<div class="callout"><p><strong>Hardware support ≠ enabled.</strong> These answer "can
+this GPU do it". The <code>M3_FEATURES</code> Swift/ Metal build flag separately gates
+whether the ray-tracing and mesh-shading code paths are compiled in at all.</p></div>
+
+<h2>MTTerrainView</h2>
+<p><code>public final class MTTerrainView: MTKView</code> — the zero-boilerplate
+integration. Drop it in, assign <code>world</code>, drive the camera from
+<code>onFrame</code>. Conforms to <code>MTKViewDelegate</code> itself.</p>
+<pre><code class="language-swift">public override init(frame: CGRect, device: MTLDevice?)
+public required init(coder: NSCoder)
+
+public var world: MTTerrainWorld?              // assigning rebuilds the renderer
+public private(set) var renderer: MTTerrainRenderer?
+public private(set) var fps: Double            // exponential moving average
+public var onFrame: ((MTTerrainView, TimeInterval) -&gt; Void)?  // per-frame hook
+
+// Display settings (forwarded to renderer; nil-safe)
+public var wireframe: Bool            // default false
+public var showsWater: Bool           // default true
+public var fogEnabled: Bool           // default true
+public var shaderEffectsEnabled: Bool // default false
+public var sunAzimuth: Float          // default 45 (degrees)
+public var sunElevation: Float        // default 50 (degrees)
+public var viewDistance: Int          // default 6
+public var skybox: MTSkybox?          // read-only passthrough
+public var usesMetal4: Bool           // true when the Metal 4 path is active
+
+public func setCamera(position: SIMD3&lt;Float&gt;, target: SIMD3&lt;Float&gt;,
+                      fovDegrees: Float = 55, aspect: Float,
+                      near: Float = 1, far: Float = 4000)
+// Call every frame (or from onFrame) before draw. Also drives chunk streaming.
+
+// M3_FEATURES builds only:
+public var meshShadingEnabled: Bool   // master switch, M3+/A17 Pro+ only
+public var rayTracingActive: Bool     // true when ray tracing is active this frame
+</code></pre>
+<p>Notes:</p>
+<ul>
+<li>Assigning <code>world</code> rebuilds the renderer, carrying over
+<code>wireframe</code>, <code>showsWater</code>, <code>fogEnabled</code>,
+<code>shaderEffectsEnabled</code>, <code>sunAzimuth</code>, <code>sunElevation</code>.
+Assigning <code>nil</code> tears it down.</li>
+<li><code>onFrame</code> fires before the renderer draws each frame — the right place
+for camera math and per-frame game logic.</li>
+<li><code>setCamera</code> also drives chunk streaming internally (it calls
+<code>renderer.update(cameraTarget:)</code> with the target's XZ).</li>
+</ul>
+
+<h2>MTTerrainRenderer</h2>
+<p><code>public final class MTTerrainRenderer</code> — full control for custom
+<code>MTKView</code> integrations or offscreen work. Chunk streaming with an LRU mesh
+cache, background mesh building, one draw call per chunk, one for water, one instanced
+draw per structure kind.</p>
+<pre><code class="language-swift">public init(device: MTLDevice, world: MTTerrainWorld)
+
+public var world: MTTerrainWorld       // didSet invalidates chunk caches
+public var wireframe: Bool = false
+public var showsWater: Bool = true
+public var fogEnabled: Bool = true
+public var sunAzimuth: Float = 45      // 0-360°, direction
+public var sunElevation: Float = 50    // 0-90°, height
+public var currentFPS: Double = 0
+public var shaderEffectsEnabled: Bool = false  // specular + fresnel
+public var skybox: MTSkybox?           // created by default; nil to disable
+public var rayTracing: MTRayTracing?   // nil without M3_FEATURES or HW support
+public var viewDistance: Int           // → world.config.viewDistance (rebuilds)
+public var detailAmount: Float = 1.0   // 0...1 procedural 3D detail
+public private(set) var usesMetal4: Bool
+
+public func setCamera(position: SIMD3&lt;Float&gt;, target: SIMD3&lt;Float&gt;,
+                      fovDegrees: Float, aspect: Float, near: Float, far: Float)
+public func update(cameraTarget: SIMD2&lt;Float&gt;)
+// Streams chunks around cameraTarget (world XZ). Call EVERY frame.
+// Missing chunks build on a background queue; draw never blocks.
+
+public func draw(in view: MTKView,
+                 overlay: ((MTLRenderCommandEncoder) -&gt; Void)? = nil)
+// Renders the frame. Call from mtkView(_:draw:).
+// overlay: draw app objects (cars, markers) in the SAME render pass.
+
+public func renderReflection(to texture: MTLTexture,
+                             from cameraPosition: SIMD3&lt;Float&gt;,
+                             lookingAt target: SIMD3&lt;Float&gt;,
+                             fovDegrees: Float = 70)
+// Offscreen render (skybox + terrain) for mirrors. Structures/water skipped.
+// Synchronous — use sparingly (≤ once per frame), low-res texture (256x128).
+
+// M3_FEATURES builds only:
+public var meshShadingEnabled: Bool = true
+</code></pre>
+<h3>Draw order (per frame)</h3>
+<ol>
+<li>Skybox — fullscreen triangle at the far plane, no depth writes.</li>
+<li>Terrain chunks — frustum-culled, one draw call each, back-face culled.</li>
+<li>Structures — one instanced draw per kind, double-sided (no culling).</li>
+<li>Water — blended, drawn last, depth-tested but no depth write.</li>
+<li><code>overlay</code> closure — your objects, same encoder, same pass.</li>
+</ol>
+<h3>Threading</h3>
+<ul>
+<li>Chunk mesh building: dedicated concurrent queue
+(<code>com.MetalTerrain.meshBuild</code>, <code>.userInitiated</code>). Never blocks draw.</li>
+<li><code>update(cameraTarget:)</code> is throttled internally — cheap when the camera
+hasn't crossed a chunk boundary.</li>
+<li>Structure instance buffers swap on the main queue; placement queries run on the
+build queue.</li>
+<li><code>draw</code> uses triple-buffered uniforms (semaphore of 3) — the CPU never
+overwrites a uniform slot the GPU is still reading.</li>
+</ul>
+
+<h2>MTSkybox</h2>
+<pre><code class="language-swift">public final class MTSkybox
+public init(device: MTLDevice)
+public var sunAzimuth: Float = 45    // degrees; 0° = +Z, 90° = +X
+public var sunElevation: Float = 50  // &gt;0 day, ~0 sunset tint, &lt;0 night (stars)
+public func draw(encoder: MTLRenderCommandEncoder,
+                 viewProjection: matrix_float4x4)
+// Call FIRST in the frame. The renderer does this automatically and mirrors
+// its own sunAzimuth/sunElevation into the skybox before drawing.
+</code></pre>
+<h2>MTRayTracing</h2>
+<p>Exists in both builds so renderer code compiles either way; without
+<code>M3_FEATURES</code> it's a stub (every method a safe no-op).</p>
+<pre><code class="language-swift">public final class MTRayTracing
+public init(device: MTLDevice)   // unsupported device → all methods no-op
+public var isSupported: Bool     // HW ray tracing AND M3_FEATURES build
+public var topLevelStructure: MTLAccelerationStructure?  // nil until first update
+public func update(chunks: [(id: Int, vertexBuffer: MTLBuffer,
+                             indexBuffer: MTLBuffer, indexCount: Int,
+                             transform: matrix_float4x4)])
+// BLAS cached per chunk id; TLAS rebuilt only when the set changes.
+// There is deliberately NO software ray-tracing fallback.
+</code></pre>
+<p>Enabled by compiling with <code>M3_FEATURES</code> <strong>and</strong> running on
+M3+/A17 Pro+ hardware. The renderer engages it automatically — there is no on/off
+switch; the shadow pipeline switches over once the TLAS exists.</p>
+
+<h2>Structures: MTStructureKind, MTStructurePlacement, MTStructureBuilder</h2>
+<pre><code class="language-swift">public enum MTStructureKind: String, CaseIterable {
+    case house, tower, tree, boulder, well, windmill, dungeon
+}
+
+public struct MTStructurePlacement {
+    public var kind: MTStructureKind
+    public var position: SIMD3&lt;Float&gt;  // world coords, y = terrain height
+    public var rotationY: Float        // radians about Y
+    public var scale: Float            // uniform scale
+    public init(kind:position:rotationY:scale:)
+}
+
+public enum MTStructureBuilder {
+    // Deterministic procedural meshes (boxes, prisms, cylinders, cones,
+    // displaced spheres). Base at y = 0, a few world units tall.
+    public static func mesh(for kind: MTStructureKind)
+        -&gt; (vertices: [MTSimpleVertex], indices: [UInt32])
+}
+
+public struct MTSimpleVertex {
+    public var position, normal, color: SIMD3&lt;Float&gt;
+    public init(position:normal:color:)
+}
+</code></pre>
+<h2>MTVertex (mesh contract)</h2>
+<p><code>public struct MTVertex</code> — the canonical terrain vertex. Three
+<code>SIMD4&lt;Float&gt;</code> (position, normal, color): 48 bytes. The <code>w</code>
+of color carries the <strong>material ID</strong> the shader uses for per-material
+effects: 0 = grass, 1 = rock, 2 = sand, 3 = snow, 4 = deep snow, 5 = water.</p>
+<pre><code class="language-swift">public struct MTVertex {
+    public var position: SIMD4&lt;Float&gt;
+    public var normal: SIMD4&lt;Float&gt;
+    public var color: SIMD4&lt;Float&gt;   // xyz = linear RGB, w = material ID
+    public init(position: SIMD3&lt;Float&gt;, normal: SIMD3&lt;Float&gt;,
+                color: SIMD3&lt;Float&gt;)
+    public init(position: SIMD3&lt;Float&gt;, normal: SIMD3&lt;Float&gt;,
+                color: SIMD4&lt;Float&gt;)
+}
+
+public enum MTMeshBuilder {  // pure static functions, background-safe
+    public static func buildTerrainMesh(chunk: MTChunk, world: MTTerrainWorld)
+        -&gt; (vertices: [MTVertex], indices: [UInt32])
+    public static func buildLOD(for chunk: MTChunk, world: MTTerrainWorld,
+                                distanceFactor: Float)
+        -&gt; (vertices: [MTVertex], indices: [UInt32])
+    public static func buildWaterMesh(size: Float, level: Float,
+        color: SIMD3&lt;Float&gt; = SIMD3&lt;Float&gt;(0.16, 0.42, 0.66))
+        -&gt; (vertices: [MTVertex], indices: [UInt32])
+    public static func buildStructureMeshes(
+        kinds: [MTStructureKind] = MTStructureKind.allCases)
+        -&gt; [MTStructureKind: (vertices: [MTVertex], indices: [UInt32])]
+}
+</code></pre>
+<div class="callout"><p><strong>Why SIMD4 and not SIMD3?</strong> Swift pads
+<code>SIMD3&lt;Float&gt;</code> to 16 bytes but Metal packs <code>float3</code> as 12 —
+a classic cross-language layout trap. Using <code>SIMD4</code> everywhere removes all
+ambiguity between the Swift and Metal sides.</p></div>
 
   </main>
 </div>

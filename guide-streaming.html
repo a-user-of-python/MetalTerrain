@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chunk Streaming &amp; LOD — MetalTerrain Docs</title>
+<meta name="description" content="MetalTerrain chunk streaming: lifecycle, build queue, eviction, LOD, and anti-hole guarantees.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Metal<span>Terrain</span></a>
+  <span class="tagline">3D terrain library for iOS</span>
+  <button class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+<nav><ul>
+<li><a href="index.html">Home</a></li>
+<li><a href="getting-started.html">Getting Started</a></li>
+<li><a href="architecture.html">Architecture</a></li>
+<li><a href="api.html">API Reference</a></li>
+<li class="nav-section">Guides</li>
+<li><ul class="nav-sub">
+<li><a href="guide-biomes.html">Biome Authoring</a></li>
+<li><a href="guide-noise.html">Noise Tuning</a></li>
+<li><a href="guide-performance.html">Performance</a></li>
+<li><a href="guide-streaming.html">Chunk Streaming & LOD</a></li>
+<li><a href="guide-structures.html">Structures</a></li>
+<li><a href="guide-water.html">Water Rendering</a></li>
+<li><a href="guide-camera.html">Camera & Input</a></li>
+<li><a href="guide-raytracing.html">Ray Tracing</a></li>
+<li><a href="guide-meshshading.html">Mesh Shading</a></li>
+<li><a href="guide-skybox.html">Skybox</a></li>
+<li><a href="guide-advanced.html">Advanced Features</a></li>
+</ul></li>
+<li><a href="chip-support.html">Chip Support</a></li>
+<li><a href="examples.html">Examples</a></li>
+<li><a href="faq.html">FAQ & Troubleshooting</a></li>
+<li><a href="migration.html">Migration Notes</a></li>
+</ul></nav>
+  </aside>
+  <main class="content">
+<h1>Chunk Streaming &amp; LOD</h1>
+<p class="lead">How the infinite world pages in around the camera: the chunk lifecycle,
+the background build queue, eviction policy, LOD, and the anti-hole guarantees.</p>
+
+<h2>The chunk lifecycle</h2>
+<pre><code>needed = square(viewDistance) around camera
+    │
+    ├─▶ in cache ─▶ frustum test ─▶ draw (1 draw call)
+    │
+    ├─▶ missing ─▶ dispatch to build queue (nearest-first)
+    │                  │
+    │                  ├─▶ generation changed while queued? → drop (no work done)
+    │                  ├─▶ generate heights → build mesh → create MTLBuffers
+    │                  └─▶ generation changed while building? → drop (no install)
+    │                  └─▶ install into cache under lock
+    │
+    └─▶ out of range ─▶ evict (Chebyshev distance &gt; radius + 1)
+                        └─▶ safety ring: +1 ring kept briefly while replacements build</code></pre>
+
+<h2><code>update(cameraTarget:)</code> in detail</h2>
+<p>Called every frame with the camera target's world XZ. Steps:</p>
+<ol>
+<li><strong>Config check.</strong> If <code>world.configVersion</code> changed,
+invalidate caches and rebuild the water plane. (This is why setting
+<code>config</code> is not free — batch your changes.)</li>
+<li><strong>Fast path.</strong> If the camera hasn't crossed a chunk boundary since
+last frame, almost nothing happens — the needed set is identical.</li>
+<li><strong>Needed set.</strong> The square of chunk coords within <code>radius =
+viewDistance</code> of the camera chunk.</li>
+<li><strong>Eviction.</strong> Cached chunks with Chebyshev distance &gt;
+<code>radius + 1</code> are evicted. The <code>+1</code> is the safety ring: chunks
+just outside the view radius are retained while their replacements build, so fast
+movement never reveals holes where chunks should connect.</li>
+<li><strong>Dispatch.</strong> Missing chunks are sorted nearest-first and dispatched
+to the concurrent build queue (<code>com.MetalTerrain.meshBuild</code>,
+<code>.userInitiated</code>).</li>
+<li><strong>Cache cap.</strong> LRU cap at
+<code>min((2×(radius+1)+1)², 300)</code> chunks — sized to hold the view square plus
+the safety ring.</li>
+</ol>
+
+<h2>The build queue and <code>buildGeneration</code></h2>
+<p>Every config change (including seed changes and the Regenerate button) bumps a
+<code>buildGeneration</code> counter. Each dispatched build captures the generation at
+dispatch time and checks it twice:</p>
+<ul>
+<li><strong>Before expensive work:</strong> if a newer generation was requested while
+this build sat queued, it's dropped without sampling a single noise value.</li>
+<li><strong>After building:</strong> if the generation changed mid-build, the finished
+mesh is discarded instead of installed.</li>
+</ul>
+<p>This is what makes rapid Regenerate taps safe: at most one generation's worth of
+builds ever does real work. (The 1.5&nbsp;s UI debounce is the second layer.)</p>
+
+<h2>LOD (level of detail)</h2>
+<p>Chunks far from the camera don't need full vertex density. The design:</p>
+<ul>
+<li><code>distanceFactor = dist / (viewDistance × chunkWorldSize)</code>, 0 at the
+camera, 1 at the view edge.</li>
+<li>Chunks with <code>distanceFactor &gt; 0.4</code> generate at
+<code>resolutionScale: 0.5</code> — half the vertices per side, <strong>4× fewer noise
+evaluations and 4× fewer triangles</strong>.</li>
+<li><code>MTMeshBuilder.buildLOD(for:world:distanceFactor:)</code> selects the mesh
+stride from the same factor.</li>
+</ul>
+<div class="callout"><p><strong>Current status:</strong> LOD is temporarily disabled
+(all chunks build at full resolution) because mixed-resolution neighbors produced
+T-junction cracks — vertices of a full-res chunk that don't lie on the half-res
+neighbor's edge. Border normals already sample true neighbor heights (no lighting
+seams); proper border <em>stitching</em> will re-enable LOD without cracks. The 5×
+chunk-build speedup keeps full-res streaming smooth in the meantime.</p></div>
+
+<h2>Anti-hole guarantees</h2>
+<p>Three mechanisms, layered:</p>
+<ol>
+<li><strong>Skirts.</strong> Every chunk mesh gets vertical skirts on all four borders
+(depth <code>heightScale × 0.35 + 10</code>). Even if two neighbors disagree slightly,
+you see skirt wall, not sky.</li>
+<li><strong>Safety ring.</strong> Eviction keeps radius&nbsp;+&nbsp;1, so a chunk is
+never removed before its replacement exists.</li>
+<li><strong>Border normals.</strong> Edge-vertex normals are computed from true neighbor
+heights via <code>world.heightAt</code>, so adjacent chunks shade identically at the
+seam — no lighting discontinuity even where geometry meets.</li>
+</ol>
+
+<h2>Frustum culling</h2>
+<p>Each cached chunk stores an AABB (XZ extent from its coord, Y from min/max height
+± 20). Every frame the renderer extracts the frustum planes from the view-projection
+matrix and skips chunks entirely outside it — no draw call, no vertex processing.
+Chunks behind the camera or beyond the far plane cost essentially nothing.</p>
+
+<h2>Tuning streaming</h2>
+<pre><code class="language-swift">// Bigger view, more streaming work (quadratic!):
+view.viewDistance = 8   // → world.config.viewDistance; rebuilds the stream
+
+// Smaller chunks stream faster but show more pop-in at the horizon:
+var config = MTTerrainConfig.default
+config.chunkResolution = 192   // fewer verts → faster builds
+config.chunkWorldSize = 1000   // keep world scale constant
+world.config = config
+</code></pre>
+<ul>
+<li><strong>Pop-in at the horizon</strong> → raise <code>viewDistance</code> (costly)
+or accept it; nearest-first ordering means the area around you always resolves first.</li>
+<li><strong>Hitches while moving fast</strong> → the build queue is saturated. Lower
+<code>chunkResolution</code> or <code>viewDistance</code>. Check that you're not
+changing <code>config</code> per frame (each set invalidates everything).</li>
+<li><strong>Holes during fast movement</strong> → should not happen with the safety
+ring; if you see them, it's a bug — report the seed and camera path.</li>
+</ul>
+
+  </main>
+</div>
+<footer class="site-footer">
+  MetalTerrain — Swift + Metal 3D terrain library.
+  <a href="https://github.com/a-user-of-python/MetalTerrain">GitHub</a>
+</footer>
+<script src="script.js"></script>
+</body>
+</html>
