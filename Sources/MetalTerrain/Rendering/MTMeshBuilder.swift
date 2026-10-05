@@ -37,6 +37,12 @@ public struct MTVertex {
         self.normal = SIMD4<Float>(normal, 0)
         self.color = SIMD4<Float>(color, 1)
     }
+
+    public init(position: SIMD3<Float>, normal: SIMD3<Float>, color: SIMD4<Float>) {
+        self.position = SIMD4<Float>(position, 0)
+        self.normal = SIMD4<Float>(normal, 0)
+        self.color = color
+    }
 }
 
 // MARK: - Mesh builder
