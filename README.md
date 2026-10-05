@@ -1,3 +1,5 @@
+> **This repo is no longer updated.** Future development continues at [a-user-of-python/NativeMetalTerrain](https://github.com/a-user-of-python/NativeMetalTerrain).
+
 # MetalTerrain
 
 A 3D terrain generation library for iOS — **Swift + native Metal 3** (Metal 4 fast paths where available).
