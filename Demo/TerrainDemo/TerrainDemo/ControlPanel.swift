@@ -43,6 +43,7 @@ struct ControlPanel: View {
     @Binding var cameraMode: CameraMode
     @Binding var playerHeight: Float
     var onSunChange: (Float, Float) -> Void
+    @Binding var shaderEffectsEnabled: Bool
     var fps: Double
     @Binding var dragMode: DragMode
     var onRegenerate: () -> Void
@@ -111,6 +112,7 @@ struct ControlPanel: View {
                     Toggle("Fog", isOn: $fogEnabled)
                     Toggle("Structures", isOn: $structuresEnabled)
                     Toggle("Wireframe", isOn: $wireframe)
+                    Toggle("Shader Effects", isOn: $shaderEffectsEnabled)
                     SunControls(azimuth: 45, elevation: 50, onChange: onSunChange)
                 }
                 .font(.headline)

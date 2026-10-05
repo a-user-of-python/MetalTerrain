@@ -67,6 +67,7 @@ struct TerrainView: UIViewRepresentable {
     @Binding var showsWater: Bool
     @Binding var fogEnabled: Bool
     @Binding var viewDistance: Int
+    @Binding var shaderEffectsEnabled: Bool
     /// Mac Catalyst: what mouse-drag does (touch devices always orbit).
     @Binding var dragMode: DragMode
     /// Orbit vs first-person walk.
@@ -125,6 +126,7 @@ struct TerrainView: UIViewRepresentable {
             preset: .constant(.default), structuresEnabled: .constant(true),
             wireframe: .constant(false), showsWater: .constant(true),
             fogEnabled: .constant(true), viewDistance: .constant(6),
+            shaderEffectsEnabled: .constant(false),
             dragMode: .constant(.orbit),
             cameraMode: .constant(.walk), playerHeight: .constant(2),
             moveInput: .constant(SIMD2<Float>(0, 0))
@@ -205,6 +207,7 @@ struct TerrainView: UIViewRepresentable {
             renderer?.wireframe = parent.wireframe
             renderer?.showsWater = parent.showsWater
             renderer?.fogEnabled = parent.fogEnabled
+            renderer?.shaderEffectsEnabled = parent.shaderEffectsEnabled
             if lastViewDistance != parent.viewDistance {
                 lastViewDistance = parent.viewDistance
                 renderer?.viewDistance = parent.viewDistance

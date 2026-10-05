@@ -111,6 +111,8 @@ public final class MTTerrainRenderer {
     public var sunElevation: Float = 50
     /// Last measured FPS (written by the demo's render loop, polled by UI).
     public var currentFPS: Double = 0
+    /// Enhanced shader effects (specular + fresnel). Default off.
+    public var shaderEffectsEnabled: Bool = false
     /// Render distance in chunks (radius). Changing this updates the world
     /// config, which triggers a cache invalidation and rebuild.
     public var viewDistance: Int {
@@ -625,7 +627,7 @@ public final class MTTerrainRenderer {
             cameraPos: SIMD4<Float>(cameraPos, 1),
             fogColor: SIMD4<Float>(cfg.fogColor, density),
             lightDir: SIMD4<Float>(normalize(sunDir), 0.38),
-            misc: SIMD4<Float>(time, 0, 0, 0)
+            misc: SIMD4<Float>(time, shaderEffectsEnabled ? 1 : 0, 0, 0)
         )
         var copy = u
         let dst = uniformBuffer.contents().advanced(by: slot * uniformStrideAligned)

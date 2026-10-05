@@ -25,7 +25,7 @@ struct MTUniforms {
     float4 cameraPos;   // xyz = camera position
     float4 fogColor;    // rgb = fog color, w = fog density
     float4 lightDir;    // xyz = light direction, w = ambient strength
-    float4 misc;        // x = time seconds
+    float4 misc;        // x = time seconds, y = shader effects (0/1)
 };
 
 // Must match MTInstanceData in MTTerrainRenderer.swift (80 bytes).
@@ -101,8 +101,11 @@ float3 applyLighting(float3 albedo,
     float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.12;
 
     float3 lit = albedo * (amb + wrapNdl * (1.0 - amb));
-    lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint
-    lit += fresnel * albedo;
+    // Shader effects (specular + fresnel) are toggleable.
+    if (uniforms.misc.y > 0.5) {
+        lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint
+        lit += fresnel * albedo;
+    }
 
     float dist = distance(worldPos, uniforms.cameraPos.xyz);
     float dens = uniforms.fogColor.w;

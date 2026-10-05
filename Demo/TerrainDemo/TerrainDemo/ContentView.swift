@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var terrainRenderer: MTTerrainRenderer?
     /// Polls renderer.currentFPS 2x/sec (avoids render-loop @State writes).
     private let fpsTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    @State private var shaderEffectsEnabled = false
     @State private var panelVisible = true
     @State private var dragMode: DragMode = .orbit
 
@@ -37,6 +38,7 @@ struct ContentView: View {
                     showsWater: $showsWater,
                     fogEnabled: $fogEnabled,
                     viewDistance: $viewDistance,
+                    shaderEffectsEnabled: $shaderEffectsEnabled,
                     dragMode: $dragMode,
                     cameraMode: $cameraMode,
                     playerHeight: $playerHeight,
@@ -127,6 +129,7 @@ struct ContentView: View {
                 terrainRenderer?.sunAzimuth = az
                 terrainRenderer?.sunElevation = el
             },
+            shaderEffectsEnabled: $shaderEffectsEnabled,
             fps: fps,
             dragMode: $dragMode,
             onRegenerate: regenerate,
