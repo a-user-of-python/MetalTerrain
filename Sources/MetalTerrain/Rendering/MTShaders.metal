@@ -61,9 +61,27 @@ float3 applyLighting(float3 albedo,
                      float3 worldPos,
                      constant MTUniforms &uniforms) {
     float3 n = normalize(normal);
-    float ndl = max(dot(n, uniforms.lightDir.xyz), 0.0);
+    float3 viewDir = normalize(uniforms.cameraPos.xyz - worldPos);
+    float3 lightDir = normalize(uniforms.lightDir.xyz);
+
+    // Diffuse: NdotL with wrap for softer terminator.
+    float ndl = dot(n, lightDir);
+    float wrapNdl = clamp((ndl + 0.4) / 1.4, 0.0, 1.0);
     float amb = uniforms.lightDir.w;
-    float3 lit = albedo * (amb + ndl * (1.0 - amb));
+
+    // Specular: Blinn-Phong using Metal's built-in reflect/normalize/pow.
+    float3 halfVec = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(n, halfVec), 0.0), 48.0) * 0.35;
+    // Only on upward faces (not cliffs).
+    spec *= clamp(n.y * 1.5, 0.0, 1.0);
+
+    // Fresnel rim: subtle edge glow using built-in pow.
+    float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0) * 0.25;
+
+    float3 lit = albedo * (amb + wrapNdl * (1.0 - amb));
+    lit += spec * float3(1.0, 0.98, 0.92);  // warm sun glint
+    lit += fresnel * albedo;
+
     float dist = distance(worldPos, uniforms.cameraPos.xyz);
     float dens = uniforms.fogColor.w;
     float f = 1.0 - exp(-dens * dens * dist * dist);
