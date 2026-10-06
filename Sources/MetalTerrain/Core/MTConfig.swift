@@ -66,8 +66,8 @@ public struct MTTerrainConfig {
         self.fogDensity = max(0, fogDensity)
         self.ambientIntensity = min(max(0, ambientIntensity), 1)
         self.sunIntensity = min(max(0, sunIntensity), 2)
-        self.continentScale = max(0.1, continentScale)
-        self.riverScale = max(0.1, riverScale)
+        self.continentScale = min(max(0.1, continentScale), 5.0)
+        self.riverScale = min(max(0.1, riverScale), 5.0)
         self.mountainSharpness = min(max(0.1, mountainSharpness), 2.0)
     }
 
